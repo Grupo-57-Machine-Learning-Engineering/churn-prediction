@@ -1,0 +1,42 @@
+# Hooks executados no commit. Instale com: make install  (ou pre-commit install).
+# Rode em tudo com: make pre-commit
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      # Bloqueia commit direto na main (fluxo correto: develop -> PR -> main).
+      - id: no-commit-to-branch
+        args: ["--branch", "main"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.29.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # Guard local: recusa push cujo destino seja a branch main.
+  - repo: local
+    hooks:
+      - id: reject-push-to-main
+        name: Bloquear push direto na main
+        entry: scripts/reject-push-to-main.sh
+        language: script
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
