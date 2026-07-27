@@ -1,0 +1,61 @@
+# Detector (não previne) de push direto na main. Como o repo é privado em org
+# free, não há branch protection: este workflow denuncia com run vermelho quando
+# um commit entra na main FORA do fluxo de PR (develop -> PR -> main).
+
+name: "Guard: no direct push to main"
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificar que todos os commits vieram de PR merged para main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.event.after }}"
+          REPO="${{ github.repository }}"
+          ZERO="0000000000000000000000000000000000000000"
+
+          # before = zero quando o push cria a branch (sem range pra comparar)
+          if [ "$BEFORE" = "$ZERO" ]; then
+            echo "Push criou a branch main (sem before). Pulando checagem de range."
+            exit 0
+          fi
+
+          # compare em vez do payload do evento: payload trunca em ~20 commits
+          commits=$(gh api "repos/${REPO}/compare/${BEFORE}...${AFTER}" --jq '.commits[].sha')
+
+          if [ -z "$commits" ]; then
+            echo "Nenhum commit novo no range, nada a checar."
+            exit 0
+          fi
+
+          # AND entre commits, não OR: 1 commit sem PR já reprova o push inteiro
+          FAILED=0
+          for sha in $commits; do
+            merged_prs=$(gh api "repos/${REPO}/commits/${sha}/pulls" \
+              --jq '[.[] | select(.base.ref == "main" and .merged_at != null)] | length')
+
+            if [ "$merged_prs" -eq 0 ]; then
+              echo "::error::Commit $sha entrou em main sem PR merged associado (push direto detectado, por @${{ github.actor }})."
+              FAILED=1
+            else
+              echo "OK: commit $sha veio de PR merged para main."
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::Push direto na main detectado (por @${{ github.actor }}). Fluxo esperado: develop -> PR -> main."
+            exit 1
+          fi
