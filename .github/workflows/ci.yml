@@ -1,0 +1,36 @@
+# CI padrão do projeto: lint (ruff) + testes (pytest) via uv.
+# Roda em push e PR pra main/develop -- é o gate que valida o código em si
+# (qualidade e testes). Os guards de fluxo de branch (push direto na main,
+# origem do PR) são workflows separados: guard-no-direct-push-main.yml e
+# guard-pr-base-develop.yml.
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: make lint
+
+      - name: Test (pytest)
+        run: make test
