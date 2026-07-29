@@ -1,7 +1,22 @@
 import logging
 from unittest.mock import patch
 
+import pytest
+
+import src.logger as logger_module
 from src.logger import get_logger
+
+
+@pytest.fixture(autouse=True)
+def reset_logger_configurado():
+    """Reseta o estado global _CONFIGURED antes de cada teste.
+
+    Evita vazamento de estado entre testes (um teste anterior configurando
+    o logger não pode influenciar o resultado do próximo).
+    """
+    logger_module._CONFIGURED = False
+    yield
+    logger_module._CONFIGURED = False
 
 
 def test_get_logger_retorna_logger_com_nome_correto():
@@ -11,10 +26,6 @@ def test_get_logger_retorna_logger_com_nome_correto():
 
 @patch("src.logger.logging.basicConfig")
 def test_get_logger_configura_nivel_info(mock_basic_config):
-    import src.logger as logger_module
-
-    logger_module._CONFIGURED = False
-
     get_logger("outro_modulo")
 
     mock_basic_config.assert_called_once()
@@ -23,10 +34,6 @@ def test_get_logger_configura_nivel_info(mock_basic_config):
 
 
 def test_get_logger_nao_duplica_configuracao():
-    import src.logger as logger_module
-
-    logger_module._CONFIGURED = False
-
     with patch("src.logger.logging.basicConfig") as mock_basic_config:
         get_logger("modulo_a")
         get_logger("modulo_b")
