@@ -1,8 +1,11 @@
-.PHONY: install lint format test cov pre-commit clean
+.PHONY: install lint format test cov etl pre-commit clean
 
 install:
 	uv sync
 	uv run pre-commit install
+
+etl:
+	uv run python -m src.data.pipeline
 
 lint:
 	uv run ruff check .
