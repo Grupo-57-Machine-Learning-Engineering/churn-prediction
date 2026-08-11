@@ -3,9 +3,9 @@
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from src.data.etl_config import OUTPUT_FILENAME
 
 from src.config import PROCESSED_DATA_DIR
+from src.data.etl_config import OUTPUT_FILENAME
 from src.data.schema import validar
 
 
