@@ -290,9 +290,9 @@ def test_pipeline_nao_vaza_entre_treino_e_teste(base):
         .mean_
     )
 
-    assert not np.allclose(
-        medias_treino, medias_completas
-    ), "as estatisticas do treino coincidem com as da base inteira -- indicio de fit fora do fold"
+    assert not np.allclose(medias_treino, medias_completas), (
+        "as estatisticas do treino coincidem com as da base inteira -- indicio de fit fora do fold"
+    )
     assert pipe.transform(X_te).shape[0] == len(X_te)
 
 
