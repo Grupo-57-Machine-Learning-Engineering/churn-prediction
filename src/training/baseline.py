@@ -57,7 +57,7 @@ def treinar_baseline(
 ) -> dict:
     """Treina e avalia o baseline de Regressão Logística.
 
-    Fluxo: carrega o parquet processado -> filtra censura (mantém "Joined", 
+    Fluxo: carrega o parquet processado -> filtra censura (mantém "Joined",
     src/features/preparation.py) -> separa X/y ->
     split estratificado -> validação cruzada estratificada no treino ->
     fit final -> avaliação única no teste guardado.
