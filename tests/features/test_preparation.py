@@ -175,8 +175,8 @@ def test_nulos_legitimos_viram_categoria(base):
     saida = EngenhariaEstrutural().fit_transform(base)
 
     assert saida["services_internet_type"].isna().sum() == 0
-    assert "Sem Internet" in set(saida["services_internet_type"])
-    assert "Sem Oferta" in set(saida["services_offer"])
+    assert "No Internet Service" in set(saida["services_internet_type"])
+    assert "No Offer" in set(saida["services_offer"])
 
 
 def test_flags_de_zero_estrutural(base):

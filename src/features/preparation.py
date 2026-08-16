@@ -107,7 +107,7 @@ class EngenhariaEstrutural(BaseEstimator, TransformerMixin):
 
     O que faz
     ---------
-    1. Nulos legitimos -> categoria explicita ("Sem Internet", "Sem Oferta").
+    1. Nulos legitimos -> categoria explicita ("No Internet Service", "No Offer").
     2. Zeros estruturais -> flag binaria separada, preservando o valor
        numerico para quem tem o servico.
     3. `delta_cobranca` = total_charges - (monthly_charge * tenure).
