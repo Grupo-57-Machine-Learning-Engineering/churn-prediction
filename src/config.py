@@ -25,8 +25,10 @@ PROCESSED_DATA_DIR: Path = DATA_DIR / "processed"
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 
 # --- Dataset (Telco Customer Churn / IBM) ------------------------------------
-TARGET: str = "Churn"
-ID_COLUMN: str = "customerID"
+# Nomes pós-ETL (Contrato 1, docs/decisions.md), nao os do CSV Kaggle de 21
+# colunas que o ADR-003 decidiu nao usar como fonte de dados.
+TARGET: str = "status_churn_value"
+ID_COLUMN: str = "customer_id"
 
 # --- Split -------------------------------------------------------------------
 TEST_SIZE: float = 0.2
