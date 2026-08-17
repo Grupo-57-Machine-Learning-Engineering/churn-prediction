@@ -40,3 +40,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .ruff_cache/
+
+# MLflow tracking local (SQLite/arquivos) 
+mlflow.db
+mlruns/
