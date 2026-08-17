@@ -36,6 +36,27 @@ Pré-requisito: [uv](https://docs.astral.sh/uv/). Python 3.11 é provisionado au
 make install      # uv sync + instala hooks de pre-commit (pre-commit/commit-msg/pre-push)
 ```
 
+### Tracking de experimentos (MLflow / DagsHub)
+
+Opcional (ver ADR-004 em `docs/decisions.md`), mas se quiser registrar métricas de
+treino no DagsHub do grupo (`https://dagshub.com/ThiagoZulian/Grupo-57-Machine-Learning-Engineering`
+— nome diferente do repo no GitHub), `mlflow` e `dagshub` já vêm com o `make install`.
+Copie `.env.example` para `.env` e escolha uma das duas formas de autenticar:
+
+- **Opção A — token**: preencha `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME` e
+  `MLFLOW_TRACKING_PASSWORD` (token em DagsHub → Settings → Tokens). Sem interação.
+- **Opção B — login interativo**: deixe os 3 campos acima em branco. Na primeira run,
+  `dagshub.init()` abre um link de autorização no terminal — autorize **assim que o link
+  aparecer** (o código expira rápido); o token fica cacheado localmente depois disso.
+
+Sem nenhuma das duas, o treino não quebra: o tracking cai para um backend local
+best-effort e só loga um aviso.
+
+**Nota Windows**: se o terminal usar a codepage legada (cp1252), o `dagshub.init()`
+pode falhar com `UnicodeEncodeError` ao tentar imprimir o link colorido — já corrigido
+em `src/config.py:configurar_mlflow_tracking()`, que força UTF-8 no console antes de
+chamar o DagsHub.
+
 ## Comandos (Makefile)
 
 | Comando | O que faz |
