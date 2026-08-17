@@ -20,7 +20,12 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
 from sklearn.pipeline import Pipeline
 
-from src.config import MLFLOW_EXPERIMENT_NAME, MODELS_DIR, PROCESSED_DATA_DIR
+from src.config import (
+    MLFLOW_EXPERIMENT_NAME,
+    MODELS_DIR,
+    PROCESSED_DATA_DIR,
+    configurar_mlflow_tracking,
+)
 from src.features.preparation import build_pipeline, filtrar_censura, separar_alvo
 from src.training.metrics import calcular_metricas, formatar_metricas
 
@@ -30,9 +35,12 @@ NOME_MODELO = "baseline_logistic_regression"
 
 
 def _registrar_no_mlflow(params: dict, metricas_cv: dict, metricas_teste: dict) -> None:
-    """Registra a run no MLflow. Funciona tanto local (sem DagsHub
-    configurado, grava em ./mlruns) quanto remoto (se MLFLOW_TRACKING_URI
-    estiver setado no .env) — ver ADR-004 em docs/decisions.md.
+    """Registra a run no MLflow, no DagsHub do grupo quando possível.
+
+    `configurar_mlflow_tracking()` (src/config.py) decide entre token do
+    `.env` (Opção A) e login interativo via `dagshub.init()` (Opção B) —
+    ver ADR-004 em docs/decisions.md e a seção "Tracking de experimentos"
+    do README. Sem nenhuma das duas, cai para um backend local.
 
     Falha silenciosamente (só loga um aviso) se o MLflow não estiver
     disponível, para não quebrar o treino por causa de tracking opcional.
@@ -40,6 +48,7 @@ def _registrar_no_mlflow(params: dict, metricas_cv: dict, metricas_teste: dict) 
     try:
         import mlflow
 
+        configurar_mlflow_tracking()
         mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
         with mlflow.start_run(run_name=NOME_MODELO):
             mlflow.log_params(params)
