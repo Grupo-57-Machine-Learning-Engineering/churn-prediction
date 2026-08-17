@@ -42,10 +42,11 @@ MLFLOW_TRACKING_USERNAME: str | None = os.getenv("MLFLOW_TRACKING_USERNAME")
 MLFLOW_TRACKING_PASSWORD: str | None = os.getenv("MLFLOW_TRACKING_PASSWORD")
 MLFLOW_EXPERIMENT_NAME: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "churn-prediction")
 
-# Repositório DagsHub do grupo, usado só pela Opção B do dagshub.init()
-# (ver .env.example e README) -- nome diferente do repo no GitHub.
-DAGSHUB_REPO_OWNER: str = os.getenv("DAGSHUB_REPO_OWNER", "ThiagoZulian")
-DAGSHUB_REPO_NAME: str = os.getenv("DAGSHUB_REPO_NAME", "Grupo-57-Machine-Learning-Engineering")
+# Repositório DagsHub do grupo, usado só pela Opção B do dagshub.init().
+# Sem default aqui de propósito -- configure em .env (ver .env.example e
+# README). Nome diferente do repo no GitHub.
+DAGSHUB_REPO_OWNER: str | None = os.getenv("DAGSHUB_REPO_OWNER")
+DAGSHUB_REPO_NAME: str | None = os.getenv("DAGSHUB_REPO_NAME")
 
 
 def configurar_mlflow_tracking() -> None:
@@ -64,6 +65,14 @@ def configurar_mlflow_tracking() -> None:
     loga um aviso e segue sem tracking -- não é requisito do enunciado atual.
     """
     if MLFLOW_TRACKING_URI and MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD:
+        return
+
+    if not (DAGSHUB_REPO_OWNER and DAGSHUB_REPO_NAME):
+        logger.warning(
+            "Tracking no DagsHub não configurado: preencha MLFLOW_TRACKING_URI/"
+            "USERNAME/PASSWORD ou DAGSHUB_REPO_OWNER/DAGSHUB_REPO_NAME no .env "
+            "(ver .env.example)."
+        )
         return
 
     _forcar_utf8_no_console()
