@@ -42,9 +42,27 @@ def test_falha_do_dagshub_nao_propaga(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "MLFLOW_TRACKING_URI", None)
     monkeypatch.setattr(config, "MLFLOW_TRACKING_USERNAME", None)
     monkeypatch.setattr(config, "MLFLOW_TRACKING_PASSWORD", None)
+    monkeypatch.setattr(config, "DAGSHUB_REPO_OWNER", "dono")
+    monkeypatch.setattr(config, "DAGSHUB_REPO_NAME", "repo")
 
     dagshub_mock = MagicMock()
     dagshub_mock.init.side_effect = RuntimeError("sem rede")
     monkeypatch.setitem(__import__("sys").modules, "dagshub", dagshub_mock)
 
     config.configurar_mlflow_tracking()  # não deve lançar
+
+
+def test_nao_chama_dagshub_sem_repo_owner_e_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sem nenhuma das duas opções configuradas, só avisa -- sem default silencioso."""
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_URI", None)
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_USERNAME", None)
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_PASSWORD", None)
+    monkeypatch.setattr(config, "DAGSHUB_REPO_OWNER", None)
+    monkeypatch.setattr(config, "DAGSHUB_REPO_NAME", None)
+
+    dagshub_mock = MagicMock()
+    monkeypatch.setitem(__import__("sys").modules, "dagshub", dagshub_mock)
+
+    config.configurar_mlflow_tracking()
+
+    dagshub_mock.init.assert_not_called()
