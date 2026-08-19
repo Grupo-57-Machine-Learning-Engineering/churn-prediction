@@ -87,6 +87,43 @@ def configurar_mlflow_tracking() -> None:
         logger.warning("Não foi possível configurar o tracking no DagsHub: %s", erro)
 
 
+def limpar_runs_anteriores(nomes: list[str]) -> None:
+    """Remove (soft-delete) runs do MLflow com esses nomes no experimento atual.
+
+    Torna reexecucoes de notebook idempotentes: sem isso, cada pessoa do grupo
+    que roda o mesmo notebook gera runs duplicadas (ja aconteceu com o baseline
+    da Etapa 1, ver ADR-004 em docs/decisions.md).
+    """
+    import mlflow
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient()
+    existentes = mlflow.search_runs(
+        experiment_names=[MLFLOW_EXPERIMENT_NAME],
+        filter_string=" or ".join(f"tags.mlflow.runName = '{n}'" for n in nomes),
+        max_results=200,
+    )
+    for run_id in existentes.get("run_id", []):
+        client.delete_run(run_id)
+    if len(existentes):
+        logger.info("Idempotencia: removida(s) %d run(s) anterior(es).", len(existentes))
+
+
+def iniciar_run(nome_arquivo_fonte: str, **kwargs):
+    """`mlflow.start_run()` fixando `mlflow.source.name` explicitamente.
+
+    Em execucao headless (ex.: `jupyter nbconvert --execute`, sem servidor
+    Jupyter interativo por tras), o MLflow cai para o caminho local do
+    `ipykernel_launcher.py`, expondo o caminho absoluto de quem rodou. Ver
+    ADR-004 em docs/decisions.md.
+    """
+    import mlflow
+
+    ctx = mlflow.start_run(**kwargs)
+    mlflow.set_tag("mlflow.source.name", nome_arquivo_fonte)
+    return ctx
+
+
 def _forcar_utf8_no_console() -> None:
     """Evita `UnicodeEncodeError` do `dagshub.init()` no console do Windows.
 
