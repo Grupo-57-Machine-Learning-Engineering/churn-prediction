@@ -52,6 +52,16 @@ def test_limpar_runs_anteriores_sem_runs_nao_deleta(monkeypatch: pytest.MonkeyPa
     client_mock.delete_run.assert_not_called()
 
 
+def test_limpar_runs_anteriores_lista_vazia_nao_busca(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lista vazia deve retornar cedo, sem chamar search_runs (filtro vazio == sem filtro)."""
+    mlflow_mock = MagicMock()
+    monkeypatch.setitem(__import__("sys").modules, "mlflow", mlflow_mock)
+
+    config.limpar_runs_anteriores([])
+
+    mlflow_mock.search_runs.assert_not_called()
+
+
 def test_iniciar_run_fixa_source_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """iniciar_run deve fixar mlflow.source.name e devolver o contexto do start_run."""
     mlflow_mock = MagicMock()

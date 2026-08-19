@@ -94,6 +94,12 @@ def limpar_runs_anteriores(nomes: list[str]) -> None:
     que roda o mesmo notebook gera runs duplicadas (ja aconteceu com o baseline
     da Etapa 1, ver ADR-004 em docs/decisions.md).
     """
+    if not nomes:
+        # Sem isso, `" or ".join([])` gera filter_string="", que pro MLflow
+        # significa "sem filtro" (traz todas as runs do experimento) em vez
+        # de "nenhum nome pra buscar" -- deletaria tudo silenciosamente.
+        return
+
     import mlflow
     from mlflow.tracking import MlflowClient
 
