@@ -19,7 +19,7 @@ churn-prediction/
 ├── data/                # NÃO versionado (só local)
 ├── models/              # artefatos treinados (não versionado)
 ├── tests/               # pytest
-├── notebooks/           # EDA e exploração
+├── notebooks/           # EDA, preparação de features e modelagem (Etapas 1-2)
 ├── docs/                # Model Card e documentação do modelo
 ├── scripts/             # hooks/scripts de suporte (ex.: guard de push)
 ├── .github/             # workflows (CI + guards) e template de PR
