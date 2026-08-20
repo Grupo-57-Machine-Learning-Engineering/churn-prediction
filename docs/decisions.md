@@ -240,7 +240,7 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
   distinto do `early_stopping` interno do `MLPClassifier` (que só controla uma única
   rede).
 - **Critério de escolha do campeão:** maior PR-AUC médio de validação cruzada entre o
-  baseline e as 9 combinações candidato×método (decidido *a priori*, antes de qualquer
+  baseline e as 12 combinações candidato×método (decidido *a priori*, antes de qualquer
   avaliação no teste). O teste é avaliado uma única vez, só para o candidato vencedor.
 - **Resultado desta rodada:** campeão = Random Forest tunado via Optuna (PR-AUC de CV =
   0,7751 ± 0,0123, muito próximo do Grid/RandomizedSearchCV para o mesmo modelo — as 3
@@ -248,9 +248,17 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
   baseline em F1 (0,706 vs 0,694) mas fica marginalmente abaixo em PR-AUC (0,761 vs
   0,766) e AUC-ROC (0,905 vs 0,908) — diferença pequena o suficiente para caber dentro do
   ruído entre folds, registrada como achado honesto, não escondida. Nenhuma variante do
-  MLP superou o Random Forest ou o baseline. Números completos e todas as runs (10 de
-  tuning + baseline + comparação final + campeão) estão no MLflow/DagsHub, experimento
-  `churn-prediction` — não duplicados aqui para não desatualizar.
+  MLP superou o Random Forest ou o baseline. Números completos e todas as runs de tuning
+  dos 4 candidatos + baseline + comparação final + campeão estão no MLflow/DagsHub,
+  experimento `churn-prediction` — não duplicados aqui para não desatualizar.
+- **Regressão Logística também tunada, por checagem de assimetria:** o baseline nunca
+  tinha sido tunado (nem na Etapa 1, nem aqui), diferente de RF/MLP que passaram por 9
+  configurações tunadas no total. Como o teste mostrou baseline e campeão muito próximos
+  (ver acima), essa assimetria virou uma dúvida legítima — tunamos uma versão nova da
+  Regressão Logística (`logistic_regression_tunada`, mesma metodologia dos outros
+  candidatos, grade de `C` e `penalty`) pra checar. Resultado: PR-AUC de CV de
+  0,7574-0,7575, essencialmente igual ao baseline default e bem abaixo do Random Forest
+  — o campeão não muda, a assimetria era real mas não escondia resultado diferente.
 - **Registro do campeão:** `mlflow.sklearn.log_model(..., registered_model_name=
   "churn_champion")` no Model Registry do MLflow/DagsHub, com o alias `champion` apontando
   para a versão vigente (`models:/churn_champion@champion` — API de *stages* do MLflow
