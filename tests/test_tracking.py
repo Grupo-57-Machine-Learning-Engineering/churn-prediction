@@ -62,6 +62,26 @@ def test_limpar_runs_anteriores_lista_vazia_nao_busca(monkeypatch: pytest.Monkey
     mlflow_mock.search_runs.assert_not_called()
 
 
+def test_limpar_runs_anteriores_busca_um_nome_por_vez(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cada nome deve gerar uma busca separada (o DagsHub rejeita filtro com 2+ OR)."""
+    mlflow_mock = MagicMock()
+    mlflow_mock.search_runs.side_effect = [
+        pd.DataFrame({"run_id": ["r1"]}),
+        pd.DataFrame({"run_id": []}),
+    ]
+    client_mock = MagicMock()
+    tracking_mock = MagicMock(MlflowClient=MagicMock(return_value=client_mock))
+    monkeypatch.setitem(__import__("sys").modules, "mlflow", mlflow_mock)
+    monkeypatch.setitem(__import__("sys").modules, "mlflow.tracking", tracking_mock)
+
+    config.limpar_runs_anteriores(["nome_a", "nome_b"])
+
+    assert mlflow_mock.search_runs.call_count == 2
+    filtros = [c.kwargs["filter_string"] for c in mlflow_mock.search_runs.call_args_list]
+    assert filtros == ["tags.mlflow.runName = 'nome_a'", "tags.mlflow.runName = 'nome_b'"]
+    client_mock.delete_run.assert_called_once_with("r1")
+
+
 def test_iniciar_run_fixa_source_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """iniciar_run deve fixar mlflow.source.name e devolver o contexto do start_run."""
     mlflow_mock = MagicMock()
