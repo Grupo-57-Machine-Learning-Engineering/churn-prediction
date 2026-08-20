@@ -40,9 +40,13 @@ que resta é de origem (o CRM real ter uma taxonomia de categorias diferente da 
 dataset IBM), não coberto pelos dados disponíveis hoje.
 
 ## 5. Construção do modelo
-- Baselines: Regressão Logística e Random Forest (ou outro ensemble de árvores).
-- Modelo principal: **`MLPClassifier` (scikit-learn)**.
+- Baseline: Regressão Logística (Etapa 1, `notebooks/04_baseline.ipynb`).
+- Candidatos comparados contra o baseline (Etapa 2, `notebooks/05_modelagem.ipynb`):
+  Random Forest e `MLPClassifier` (2 variantes de treino).
 - Comparação entre as três famílias é critério de avaliação.
+- **Campeão escolhido: Random Forest (tunado via Optuna)** — PR-AUC médio de CV = 0,7751,
+  à frente do baseline (0,757) e de todas as variantes do MLP. Detalhes e achados em
+  `notebooks/05_modelagem.ipynb` §9 e ADR-004 (`decisions.md`).
 
 ## 6. Métricas de avaliação (offline)
 
@@ -61,8 +65,11 @@ acurácia reportada sem esse piso ao lado não diz nada.
    assimétrico (ver bloco 8).
 4. **Acurácia só entra em relatório acompanhada do baseline de 73,5%**, nunca isolada.
 
-Nenhum modelo foi tunado ainda nem o `MLPClassifier` (principal, ver ADR-004) treinado —
-os números do notebook 03 são piso, não resultado final.
+Resultado real (Etapa 2, ver ADR-004): baseline PR-AUC de CV = 0,757; campeão (Random
+Forest tunado) = 0,7751. No teste, o campeão supera o baseline em F1 (0,706 vs 0,694) mas
+fica marginalmente abaixo em PR-AUC (0,761 vs 0,766) — diferença dentro do ruído entre
+folds, registrada como achado honesto. Nenhuma variante do `MLPClassifier` superou o
+Random Forest ou o baseline.
 
 ## 7. Métricas de negócio / monitoramento
 - Ver [monitoring_plan.md](monitoring_plan.md).

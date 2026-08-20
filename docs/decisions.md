@@ -10,7 +10,7 @@ relevante (arquitetura, dados, contrato) ganha uma entrada aqui.
 | Linguagem                | Python 3.11                                   | Estável e bem suportada por scikit-learn e FastAPI                                              |
 | Gerenciador de pacotes   | uv                                            | Lê o `pyproject.toml` (single source of truth)                                                |
 | Dataset                  | Telco Customer Churn (IBM)                    | Caminho seguro, atende os requisitos                                                             |
-| Modelo principal         | `sklearn.neural_network.MLPClassifier`      | Enunciado atual exige comparar 3 famílias sklearn (ver ADR-004); nada de rede neural em PyTorch |
+| Famílias comparadas      | Regressão Logística (baseline), Random Forest, `MLPClassifier` | Enunciado atual exige comparar as 3 famílias sklearn (ver ADR-004); nada de rede neural em PyTorch. Campeão real (Etapa 2): Random Forest |
 | Tracking de experimentos | MLflow no DagsHub                             | Mantido por decisão do grupo mesmo não sendo mais exigido pelo enunciado atual (ver ADR-004)   |
 | Gestão de tarefas       | GitHub Projects + Issues                      | Mantém tudo junto do código                                                                    |
 | Lint / formatação      | ruff                                          | Sem erros é critério de qualidade de código                                                   |
