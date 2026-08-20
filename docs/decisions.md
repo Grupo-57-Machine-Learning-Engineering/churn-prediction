@@ -210,6 +210,75 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
 - **Decisão:** seguir o enunciado vigente como padrão geral (sem PyTorch, comparação entre Regressão Logística, Random Forest e `MLPClassifier`), mas **manter o MLflow com backend no DagsHub** para tracking de experimentos — não é mais um requisito, mas o grupo optou por preservá-lo por já ser prática validada.
 - **Consequências:** `pyproject.toml` mantém as dependências `mlflow` e `dagshub` (ver `chore/mlflow-dagshub-tracking`); `.env.example` e o bloco `MLFLOW_TRACKING_URI`/`MLFLOW_EXPERIMENT_NAME` em `src/config.py` continuam existindo. Documentos que citam MLflow/DagsHub (`monitoring_plan.md`, este arquivo) não precisam de ajuste nesse ponto.
 
+**Etapa 2 — Modelagem e Avaliação (`notebooks/05_modelagem.ipynb`):**
+
+- **Escopo mantido em notebook.** `src/models/` e `src/training/` continuam vazios de
+  propósito nesta etapa — a população desses módulos fica para a Etapa 3, quando a
+  configuração de modelo estiver definitivamente escolhida. Toda a experimentação
+  (candidatos, tuning, comparação, registro do campeão) roda em
+  `notebooks/05_modelagem.ipynb`.
+- **Sem retreino do baseline.** A Regressão Logística da Etapa 1
+  (`notebooks/04_baseline.ipynb`, run `baseline_logistic_regression`) não é retreinada —
+  o notebook 05 busca essa run existente no MLflow (`mlflow.search_runs`) e a usa como
+  referência na comparação, evitando run duplicada.
+- **Candidatos novos: 2 famílias, não 3.** `RandomForestClassifier` e `MLPClassifier`
+  (o `MLPClassifier` em duas *variantes de treino*: sem peso de classe, e com
+  `sample_weight` balanceado no `.fit()`, já que não aceita `class_weight`
+  nativamente — decisão do grupo para comparar as duas formas de tratar o
+  desbalanceamento, não uma exigência do enunciado). Junto com o baseline de Regressão
+  Logística da Etapa 1, isso fecha as 3 famílias exigidas pelo enunciado (Linear,
+  Árvore/Ensemble, MLP) — a segunda variante do MLP é uma exploração interna dentro da
+  família MLP, não uma quarta família. Sem reamostragem (SMOTE/over/undersampling) —
+  `class_weight`/`sample_weight` já cobrem o desbalanceamento (26,5% churn), reamostrar
+  por cima duplicaria a correção. Sem feature engineering nova — usa as features que já
+  saem de `build_pipeline()`.
+- **Tuning com 3 estratégias comparadas** (`GridSearchCV`, `RandomizedSearchCV`,
+  `Optuna` — nova dependência de dev em `pyproject.toml`), aplicadas ao Random Forest e
+  às 2 variantes de MLP, com o mesmo `StratifiedKFold(5, shuffle=True, random_state=42)`
+  em todas. O
+  Optuna usa *pruning* fold a fold (`trial.report`/`should_prune` com `MedianPruner`),
+  distinto do `early_stopping` interno do `MLPClassifier` (que só controla uma única
+  rede).
+- **Critério de escolha do campeão:** maior PR-AUC médio de validação cruzada entre o
+  baseline e as 9 combinações candidato×método (decidido *a priori*, antes de qualquer
+  avaliação no teste). O teste é avaliado uma única vez, só para o candidato vencedor.
+- **Resultado desta rodada:** campeão = Random Forest tunado via Optuna (PR-AUC de CV =
+  0,7751 ± 0,0123, muito próximo do Grid/RandomizedSearchCV para o mesmo modelo — as 3
+  estratégias convergem quando o espaço de busca é pequeno). No teste, o campeão supera o
+  baseline em F1 (0,706 vs 0,694) mas fica marginalmente abaixo em PR-AUC (0,761 vs
+  0,766) e AUC-ROC (0,905 vs 0,908) — diferença pequena o suficiente para caber dentro do
+  ruído entre folds, registrada como achado honesto, não escondida. Nenhuma variante do
+  MLP superou o Random Forest ou o baseline. Números completos e todas as runs (10 de
+  tuning + baseline + comparação final + campeão) estão no MLflow/DagsHub, experimento
+  `churn-prediction` — não duplicados aqui para não desatualizar.
+- **Registro do campeão:** `mlflow.sklearn.log_model(..., registered_model_name=
+  "churn_champion")` no Model Registry do MLflow/DagsHub, com o alias `champion` apontando
+  para a versão vigente (`models:/churn_champion@champion` — API de *stages* do MLflow
+  está deprecada desde a 2.9, alias é o substituto atual). Pensado para a Etapa 3, onde a
+  API deve poder puxar o modelo de produção direto de lá, sem hardcodar número de versão.
+  Com *fallback* gracioso se o Registry não estiver disponível. O `.joblib` do campeão é
+  **sempre** gravado em `models/champion_model.joblib` via `joblib.dump`, independente do
+  MLflow — entregável explícito do enunciado, não pode depender só do MLflow/DagsHub
+  estarem no ar.
+- **Métricas de negócio (threshold=0,5, teste):** sensibilidade 0,813, especificidade
+  0,823, precisão (VPP) 0,624, VPN 0,924 — ou seja, o campeão captura ~81% dos churners
+  reais e, de cada 10 alertas de risco, ~6 realmente cancelariam. Calculadas via matriz de
+  confusão contra `models/champion_model.joblib`, também logadas no MLflow em cada run de
+  tuning (`cv_sensibilidade`/`cv_especificidade`/`cv_precisao`/`cv_vpn`) para comparação
+  entre candidatos — o MLP sem peso de classe é o mais conservador (sensibilidade ~0,65,
+  precisão ~0,72); balancear via `sample_weight` desloca seu comportamento para perto do
+  Random Forest (sensibilidade ~0,85, precisão ~0,58), relevante dado o custo assimétrico
+  de perder um churner (ver `docs/eda-findings.md`).
+- **PR-AUC de 0,77 não é baixo:** o piso de um classificador sem informação é a
+  prevalência da classe (26,5%) — o campeão está a ~3x esse piso, e o ROC-AUC (0,90) é
+  forte para o domínio. O único número "mais alto" citado no projeto
+  (`status_churn_score` da IBM, ROC-AUC≈0,94) é vazamento, não uma meta legítima.
+- **Melhorias futuras não implementadas nesta rodada** (ver `notebooks/05_modelagem.ipynb`
+  §10 para detalhe): busca de hiperparâmetros mais ampla, feature engineering (interações
+  contrato×tenure, bucketização), candidatos de gradient boosting
+  (HistGradientBoosting/LightGBM/XGBoost/CatBoost), calibração de probabilidade,
+  investigar `services_offer`, e ajuste de threshold para o trade-off sensibilidade×precisão.
+
 ### ADR-005 — Alvo sem janela temporal definida
 
 - **Contexto:** a base é um snapshot (Q3) do dataset Telco Customer Churn disponibilizado
