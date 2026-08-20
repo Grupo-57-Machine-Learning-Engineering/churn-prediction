@@ -93,26 +93,30 @@ def limpar_runs_anteriores(nomes: list[str]) -> None:
     Torna reexecucoes de notebook idempotentes: sem isso, cada pessoa do grupo
     que roda o mesmo notebook gera runs duplicadas (ja aconteceu com o baseline
     da Etapa 1, ver ADR-004 em docs/decisions.md).
+
+    Busca um nome por vez em vez de um filtro `" or "` unico: o backend do MLflow
+    no DagsHub rejeita (`INVALID_PARAMETER_VALUE`) um filter_string com 2+
+    clausulas OR, mesmo sendo filtro valido pro MLflow em geral.
     """
     if not nomes:
-        # Sem isso, `" or ".join([])` gera filter_string="", que pro MLflow
-        # significa "sem filtro" (traz todas as runs do experimento) em vez
-        # de "nenhum nome pra buscar" -- deletaria tudo silenciosamente.
         return
 
     import mlflow
     from mlflow.tracking import MlflowClient
 
     client = MlflowClient()
-    existentes = mlflow.search_runs(
-        experiment_names=[MLFLOW_EXPERIMENT_NAME],
-        filter_string=" or ".join(f"tags.mlflow.runName = '{n}'" for n in nomes),
-        max_results=200,
-    )
-    for run_id in existentes.get("run_id", []):
-        client.delete_run(run_id)
-    if len(existentes):
-        logger.info("Idempotencia: removida(s) %d run(s) anterior(es).", len(existentes))
+    total_removidas = 0
+    for nome in nomes:
+        existentes = mlflow.search_runs(
+            experiment_names=[MLFLOW_EXPERIMENT_NAME],
+            filter_string=f"tags.mlflow.runName = '{nome}'",
+            max_results=200,
+        )
+        for run_id in existentes.get("run_id", []):
+            client.delete_run(run_id)
+        total_removidas += len(existentes)
+    if total_removidas:
+        logger.info("Idempotencia: removida(s) %d run(s) anterior(es).", total_removidas)
 
 
 def iniciar_run(nome_arquivo_fonte: str, **kwargs):
