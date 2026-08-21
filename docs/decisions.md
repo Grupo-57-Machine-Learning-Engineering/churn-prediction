@@ -170,10 +170,10 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
 
 `services_payment_method`: o exemplo anterior usava `"Electronic Check"`, que é domínio do
 CSV do Kaggle de 21 colunas (fonte descartada pelo ADR-003). Na base real da IBM os
-valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`. O schema deixa esse campo
-como texto livre de propósito: o `OneHotEncoder(handle_unknown="infrequent_if_exist")`
-absorve categoria não vista sem quebrar, então restringir no Pydantic só criaria um ponto
-de falha duplicado.
+valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`, e o schema valida esse
+domínio do mesmo jeito que valida as demais categóricas: valor fora da lista devolve 422.
+A regra ficou uniforme para todas as colunas por decisão do grupo no review da Etapa 3
+(o rascunho inicial deixava este campo como texto livre e o restante fechado).
 
 ```jsonc
 // Response (ChurnResponse)
@@ -342,6 +342,12 @@ de falha duplicado.
   `RandomForest`), então imputação, escala e one-hot acontecem dentro dele, e o
   `DescartadorDeColunas` já foi desenhado para tolerar o payload reduzido de 28 colunas.
   Rodar o ETL de junção dentro da API não faz sentido para predição de cliente único.
+- **Decisão (validação uniforme, pós-review):** toda coluna categórica valida domínio
+  fechado no Pydantic e devolve 422 para valor desconhecido, sem exceção. O rascunho do PR
+  deixava `services_payment_method` como texto livre enquanto as demais eram fechadas, e o
+  review pediu consistência: uma regra só é mais fácil de explicar, testar e consumir. O
+  `handle_unknown="infrequent_if_exist"` do pipeline segue como segunda linha de defesa,
+  não como caminho esperado de entrada.
 - **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
   versionado, logo o CI não o tem. Os testes de API e de predição
   (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":

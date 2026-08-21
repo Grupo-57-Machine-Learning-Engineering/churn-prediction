@@ -12,11 +12,13 @@ vez de ter o campo ignorado em silêncio. Identificadores, constantes,
 geografia, redundantes e as colunas `status_*` também nunca são input de
 predição (ver Contrato 2).
 
-Sobre os domínios categóricos: usei `Literal` onde o domínio é fechado e
-conhecido do dicionário da IBM. `services_payment_method` fica como texto
-livre porque o `OneHotEncoder(handle_unknown="infrequent_if_exist")` já
-absorve categoria não vista sem quebrar, então restringir aqui só criaria
-um ponto de falha duplicado.
+Sobre os domínios categóricos: todos os campos validam domínio fechado
+via `Literal`, espelhando o dicionário da IBM (Contrato 1). Valor fora da
+lista devolve 422, sem exceção. A regra é uniforme de propósito, pedido do
+review da Etapa 3: o rascunho inicial deixava `services_payment_method`
+como texto livre e as demais fechadas, e a mistura confundia. O
+`handle_unknown` do pipeline continua existindo como segunda linha de
+defesa, mas o caminho esperado é a validação barrar antes.
 """
 
 from __future__ import annotations
@@ -95,7 +97,7 @@ class ChurnRequest(BaseModel):
     services_unlimited_data: SimNao
     services_contract: Literal["Month-to-Month", "One Year", "Two Year"]
     services_paperless_billing: SimNao
-    services_payment_method: str = Field(min_length=1)
+    services_payment_method: Literal["Bank Withdrawal", "Credit Card", "Mailed Check"]
     services_monthly_charge: float = Field(ge=0)
     services_total_charges: float = Field(ge=0)
     services_total_refunds: float = Field(ge=0)

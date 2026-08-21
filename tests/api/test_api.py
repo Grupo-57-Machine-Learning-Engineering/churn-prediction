@@ -89,6 +89,15 @@ def test_predict_categoria_invalida_da_422(client, payload_valido):
     assert resposta.status_code == 422
 
 
+def test_predict_valida_dominio_de_toda_categorica(client, payload_valido):
+    """Regra uniforme do review: valor desconhecido da 422 em qualquer coluna."""
+    payload_valido["services_payment_method"] = "Pix"
+
+    resposta = client.post("/predict", json=payload_valido)
+
+    assert resposta.status_code == 422
+
+
 def test_predict_campo_faltando_da_422(client, payload_valido):
     payload_valido.pop("demographics_age")
 
