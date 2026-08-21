@@ -80,10 +80,16 @@ acurácia de 73,5% já é o piso de "prever ninguém cancela", ver `ml_canvas.md
 | Random Forest | RandomizedSearchCV | 0,7748 | 0,7008 | 0,9008 |
 | MLP (sem peso de classe) | Optuna | 0,7709 | 0,6902 | 0,9018 |
 | MLP (balanceado) | Optuna | 0,7682 | 0,6913 | 0,9000 |
+| Regressão Logística (tunada) | Optuna | 0,7575 | 0,6804 | 0,8961 |
 | Regressão Logística (baseline) | — | 0,757 | 0,679 | 0,896 |
 
 Critério de escolha decidido *a priori*: maior PR-AUC médio de CV. O teste foi avaliado
 uma única vez, só para o vencedor.
+
+**Checagem de assimetria:** o baseline nunca havia sido tunado (ao contrário de Random
+Forest e MLP). Rodada de tuning da Regressão Logística (`C`, `penalty`, 3 métodos)
+confirmou que o ganho é marginal (0,7571 → 0,7575 de PR-AUC de CV) e não muda o campeão —
+ver `notebooks/05_modelagem.ipynb` §9 e ADR-004 em `decisions.md`.
 
 ### Resultado no teste (avaliado uma vez)
 
@@ -201,8 +207,8 @@ decisão). Enquanto isso não é decidido, `0,5` é o threshold em uso.
 
 - Seed fixa (`SEED=42`, `src/config.py`), split idêntico entre baseline e candidatos.
 - Ambiente travado via `uv.lock` (`pyproject.toml` é a fonte única de dependências).
-- Todos os experimentos (baseline + 10 runs de tuning + comparação final + campeão)
-  registrados no MLflow/DagsHub, experimento `churn-prediction`.
+- Todos os experimentos (baseline + runs de tuning dos 4 candidatos + comparação final +
+  campeão) registrados no MLflow/DagsHub, experimento `churn-prediction`.
 - Notebook de treino: `notebooks/05_modelagem.ipynb` (reexecução headless reproduz os
   mesmos números, já que split e seeds são determinísticos).
 - Hiperparâmetros finais do campeão (`RandomForestClassifier`, escolhidos pelo Optuna):
