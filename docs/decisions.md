@@ -155,7 +155,7 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
   "services_unlimited_data": "Yes",
   "services_contract": "Month-to-Month",
   "services_paperless_billing": "Yes",
-  "services_payment_method": "Electronic Check",
+  "services_payment_method": "Credit Card",
   "services_monthly_charge": 79.85,
   "services_total_charges": 958.2,
   "services_total_refunds": 0.0,
@@ -167,6 +167,13 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
 `"No Internet Service"` dentro do pipeline, ver `EngenhariaEstrutural`). Rótulo em inglês
 de propósito: o resto do domínio categórico dessa coluna (`"Cable"`/`"DSL"`/`"Fiber Optic"`)
 já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
+
+`services_payment_method`: o exemplo anterior usava `"Electronic Check"`, que é domínio do
+CSV do Kaggle de 21 colunas (fonte descartada pelo ADR-003). Na base real da IBM os
+valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`. O schema deixa esse campo
+como texto livre de propósito: o `OneHotEncoder(handle_unknown="infrequent_if_exist")`
+absorve categoria não vista sem quebrar, então restringir no Pydantic só criaria um ponto
+de falha duplicado.
 
 ```jsonc
 // Response (ChurnResponse)
@@ -180,7 +187,11 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
 ```
 
 - Validação de tipos e domínios via Pydantic; categorias inválidas → HTTP 422.
-- Enquanto o modelo final não existe, a trilha de API mocka a resposta seguindo este formato.
+- Campos extras também dão 422 (`extra="forbid"`): em particular `services_offer`, em
+  quarentena por suspeita de vazamento (notebook 03 §5.2), é rejeitada explicitamente em
+  vez de silenciosamente ignorada.
+- Implementado na Etapa 3 (`src/api/schemas.py` + `src/api/main.py`, ver ADR-006). O mock
+  previsto originalmente para esta trilha deixou de ser necessário.
 
 ---
 
@@ -305,3 +316,41 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
   como testado empiricamente no notebook 03. O Contrato 3 documenta explicitamente que
   `probability` não tem unidade de tempo. O Model Card deve registrar essa limitação
   (previsão é sobre estado observado, não sobre risco em um horizonte futuro).
+
+### ADR-006 — Etapa 3: módulo de predição e API de inferência
+
+- **Contexto:** com o campeão definido e registrado (ADR-004), a Etapa 3 popula
+  `src/models/` e `src/api/` com o serviço de inferência exigido pelo enunciado
+  (`GET /health` + `POST /predict`, mínimo 2 testes automatizados).
+- **Decisão (fonte do modelo, local primeiro):** `carregar_campeao()` em
+  `src/models/predict.py` carrega `models/champion_model.joblib` como padrão e só tenta
+  `models:/churn_champion@champion` no MLflow/DagsHub como fallback, quando o arquivo
+  local não existe e o `.env` está configurado. O motivo: o joblib é o entregável
+  explícito do enunciado e funciona sem rede e sem credencial, enquanto o Registry é
+  conveniência, seguindo a mesma lógica do fallback gracioso do ADR-004. Sem nenhuma das
+  duas fontes a API sobe mesmo assim: `/health` responde `ok` e `/predict` devolve 503
+  com instrução de como obter o artefato, de modo que a API nunca caia por falta de
+  modelo.
+- **Decisão (threshold de decisão):** mantido em 0,5 (`src/config.py:THRESHOLD_DECISAO`),
+  o mesmo com que o campeão foi avaliado (métricas de negócio do ADR-004: sensibilidade
+  0,813, precisão 0,624). O ajuste do trade-off entre sensibilidade e precisão segue como
+  melhoria futura (notebook 05, seção 10). Se acontecer, muda numa constante única e
+  ganha entrada aqui.
+- **Decisão (formato de entrada):** a API recebe o cliente já no formato pós-ETL
+  (Contrato 3), não no formato cru das 5 planilhas. O artefato salvo é o Pipeline
+  completo (`EngenhariaEstrutural`, `DescartadorDeColunas`, `ColumnTransformer`,
+  `RandomForest`), então imputação, escala e one-hot acontecem dentro dele, e o
+  `DescartadorDeColunas` já foi desenhado para tolerar o payload reduzido de 28 colunas.
+  Rodar o ETL de junção dentro da API não faz sentido para predição de cliente único.
+- **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
+  versionado, logo o CI não o tem. Os testes de API e de predição
+  (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":
+  a mesma factory `build_pipeline()` de produção, fitada em segundos sobre uma base
+  sintética com as 28 colunas do Contrato 3 (`tests/conftest.py`), injetada via
+  monkeypatch no lugar do carregamento real.
+- **Consequências:** `model_version` da resposta reporta a versão do pacote
+  (`src.__version__`, gerida pelo commitizen), não a versão do Model Registry, por
+  simplicidade. Se o grupo quiser expor a versão do Registry, é mudança de contrato.
+  O exemplo do Contrato 3 foi corrigido (`services_payment_method` saiu de
+  "Electronic Check", domínio do Kaggle, para "Credit Card", domínio da base real).
+  Como rodar a API está no README, na seção "Rodando a API localmente".

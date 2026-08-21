@@ -4,17 +4,14 @@ Previsão de churn de clientes (dataset Telco Customer Churn / IBM) com Scikit-L
 
 ## Estrutura
 
-Os módulos de `src/` estão criados mas ainda vazios — o comentário indica a
-responsabilidade planejada de cada um.
-
 ```
 churn-prediction/
 ├── src/
-│   ├── data/            # (a implementar) carregamento e split
-│   ├── features/        # (a implementar) transformadores custom do pipeline
-│   ├── models/          # (a implementar) baseline, ensemble e MLPClassifier
-│   ├── training/        # (a implementar) treino, validação cruzada e comparação
-│   ├── api/             # (a implementar) FastAPI: rotas, schemas Pydantic
+│   ├── data/            # ETL: extração das 5 planilhas IBM, merge, schema pandera
+│   ├── features/        # transformadores custom + build_pipeline() (Contrato 2)
+│   ├── models/          # carregamento do campeão e predição (Etapa 3)
+│   ├── training/        # (a implementar) treino como script — hoje vive no notebook 05
+│   ├── api/             # FastAPI: rotas e schemas Pydantic (Etapa 3)
 │   └── config.py        # seeds, paths, constantes
 ├── data/                # NÃO versionado (só local)
 ├── models/              # artefatos treinados (não versionado)
@@ -56,6 +53,80 @@ best-effort e só loga um aviso.
 pode falhar com `UnicodeEncodeError` ao tentar imprimir o link colorido — já corrigido
 em `src/config.py:configurar_mlflow_tracking()`, que força UTF-8 no console antes de
 chamar o DagsHub.
+
+## Rodando a API localmente
+
+A API de inferência (Etapa 3) serve o modelo campeão via FastAPI.
+
+Pré-requisito: o modelo campeão. O artefato `models/champion_model.joblib` não é
+versionado, e há duas formas de obtê-lo:
+
+1. Rodar o notebook de modelagem (`notebooks/05_modelagem.ipynb`), que grava o joblib
+   sempre, com ou sem MLflow no ar; ou
+2. Deixar o fallback trabalhar: com o `.env` configurado (ver seção de tracking acima),
+   a API baixa `models:/churn_champion@champion` do Model Registry do DagsHub sozinha
+   quando não encontra o joblib local.
+
+Sem nenhuma das duas, a API sobe mesmo assim: `GET /health` responde `ok` e
+`POST /predict` devolve 503 explicando o que falta.
+
+**Subir o servidor:**
+
+```bash
+uv run uvicorn src.api.main:app --reload
+```
+
+- Documentação interativa (Swagger): <http://127.0.0.1:8000/docs>. Dá pra testar o
+  `/predict` pelo navegador, com o payload de exemplo já preenchido.
+- Healthcheck: `curl http://127.0.0.1:8000/health` responde `{"status":"ok"}`
+
+Exemplo de predição (payload completo no Contrato 3 de `docs/decisions.md`):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @- <<'EOF'
+{
+  "demographics_gender": "Female",
+  "demographics_age": 34,
+  "demographics_senior_citizen": "No",
+  "demographics_married": "Yes",
+  "demographics_dependents": "No",
+  "demographics_number_of_dependents": 0,
+  "services_number_of_referrals": 0,
+  "services_tenure_in_months": 12,
+  "services_phone_service": "Yes",
+  "services_avg_monthly_long_distance_charges": 15.3,
+  "services_multiple_lines": "No",
+  "services_internet_type": "Fiber Optic",
+  "services_avg_monthly_gb_download": 24,
+  "services_online_security": "No",
+  "services_online_backup": "Yes",
+  "services_device_protection_plan": "No",
+  "services_premium_tech_support": "No",
+  "services_streaming_tv": "Yes",
+  "services_streaming_movies": "No",
+  "services_streaming_music": "No",
+  "services_unlimited_data": "Yes",
+  "services_contract": "Month-to-Month",
+  "services_paperless_billing": "Yes",
+  "services_payment_method": "Credit Card",
+  "services_monthly_charge": 79.85,
+  "services_total_charges": 958.2,
+  "services_total_refunds": 0.0,
+  "services_total_extra_data_charges": 0
+}
+EOF
+```
+
+Resposta: `{"churn": true|false, "probability": 0.0 a 1.0, "model_version": "0.1.0"}`.
+A probabilidade é a propensão de churn no snapshot atual, sem horizonte temporal
+(ADR-005); a classe usa o threshold padrão 0,5 (`src/config.py:THRESHOLD_DECISAO`,
+ADR-006). Payload inválido devolve 422: tipo ou domínio errado, campo faltando ou campo
+extra, incluindo `services_offer`, que está em quarentena por suspeita de vazamento.
+
+No PowerShell o heredoc acima não existe. Use o Swagger em `/docs`, ou salve o JSON num
+arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d "@payload.json"`.
 
 ## Comandos (Makefile)
 
