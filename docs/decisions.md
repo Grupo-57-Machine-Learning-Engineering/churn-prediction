@@ -118,7 +118,8 @@ As observações de vazamento/derivação do alvo vêm da análise empírica do 
 
 ### Contrato 3 — API (Pydantic)
 
-Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
+Endpoints em `src/api`. Os dois primeiros são exigidos explicitamente pelo enunciado
+atual; o terceiro é conveniência de demonstração pedida no review da Etapa 3.
 
 - `GET /health` — liveness simples, sem dependências externas.
 
@@ -127,7 +128,17 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
   { "status": "ok" }
   ```
 - `POST /predict` — request espelha as 28 features de entrada do Contrato 2 (colunas do
-  Contrato 1 que sobrevivem ao descarte padrão).
+  Contrato 1 que sobrevivem ao descarte padrão). **Todos os campos são opcionais**, ver
+  ADR-006.
+- `GET /sample` — amostra de clientes de exemplo já pontuados, cada um com o `payload`
+  completo e o `resultado` do modelo. Serve para ver a API funcionando sem montar payload
+  na mão e para a demonstração da entrega. O `payload` de qualquer item pode ser colado no
+  `POST /predict` e devolve exatamente os mesmos números, garantido por teste
+  (`test_sample_bate_com_predict`), porque os dois caminhos usam a mesma conversão
+  (`ChurnRequest.to_dataframe`) e a mesma função `prever`. Os perfis são fixos, escritos à
+  mão dentro do domínio do Contrato 1, e não linhas do parquet: o parquet não é versionado
+  e cliente real não é coisa para devolver em endpoint de demonstração. A amostra cobre os
+  dois extremos de risco, cliente sem internet, ficha incompleta e categoria desconhecida.
 
 ```jsonc
 // Request  (ChurnRequest)
@@ -178,6 +189,15 @@ uma lista fechada: categoria nova passa pela validação e é absorvida pelo
 `OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline. Decisão do review da
 Etapa 3, detalhada no ADR-006.
 
+**Todo campo é opcional.** O exemplo acima é um payload completo, mas nenhum campo é
+obrigatório: o que faltar é imputado pelo pipeline. Duas colunas têm ressalva de
+significado, `services_avg_monthly_gb_download` e
+`services_avg_monthly_long_distance_charges`, onde **zero e ausente querem dizer coisas
+diferentes**. Zero significa que o cliente não tem o serviço (é o que alimenta
+`flag_sem_internet` e `flag_sem_telefone`, ver `ZEROS_ESTRUTURAIS`), enquanto ausente
+significa apenas que o dado não veio. Mandar zero por não saber o valor empurra a
+predição para baixo, porque não ter internet é o fator de proteção mais forte da base.
+
 ```jsonc
 // Response (ChurnResponse)
 {
@@ -189,9 +209,9 @@ Etapa 3, detalhada no ADR-006.
 }
 ```
 
-- Validação de tipos e faixas via Pydantic: tipo errado, campo faltando, idade ou valor
-  monetário negativo devolvem HTTP 422. Categoria de texto desconhecida **não** devolve
-  422, pontua normalmente (ADR-006).
+- Validação de tipos e faixas via Pydantic: tipo errado, idade ou valor monetário negativo
+  devolvem HTTP 422. Categoria de texto desconhecida e campo ausente **não** devolvem 422,
+  pontuam normalmente (ADR-006).
 - Campos extras também dão 422 (`extra="forbid"`): em particular `services_offer`, em
   quarentena por suspeita de vazamento (notebook 03 §5.2), é rejeitada explicitamente em
   vez de silenciosamente ignorada.
@@ -365,6 +385,28 @@ Etapa 3, detalhada no ADR-006.
   sem sinalizar isso na resposta. Sinalizar é justamente o trabalho de detecção de data
   drift, que o grupo decidiu tratar na etapa de monitoramento (ver `monitoring_plan.md`,
   ainda a criar) em vez de improvisar um aviso no payload agora.
+- **Decisão (campos opcionais, pós-review):** nenhum campo do `POST /predict` é
+  obrigatório. Quem consome nem sempre tem a ficha completa do cliente, e o pipeline foi
+  construído para isso desde a Etapa 1, com `SimpleImputer(strategy="median",
+  add_indicator=True)` nos numéricos e imputação por constante nos categóricos. Pesou
+  também uma incoerência medida antes da mudança: como as categóricas são `str` livre, a
+  API já aceitava string vazia, e string vazia e campo omitido produzem exatamente a mesma
+  probabilidade (0,0517 nos dois casos no pipeline sintético dos testes). Recusar um e
+  aceitar o outro era diferença de forma, não de informação.
+  Junto com essa decisão veio um conserto em `EngenhariaEstrutural`
+  (`src/features/preparation.py`): as flags de zero estrutural tratavam nulo como zero, e
+  zero ali significa "não tem o serviço". Sem o conserto, omitir
+  `services_avg_monthly_gb_download` marcava `flag_sem_internet=1`, ou seja, o cliente
+  entrava no modelo como se não tivesse internet, que é o fator de proteção mais forte da
+  base (7,4% de churn contra 31,8%), enviesando a predição para baixo em silêncio. Agora o
+  nulo permanece nulo e quem decide é o imputer. **A mudança não altera nada do que o
+  modelo aprendeu**: nessas colunas a base de treino nunca tem nulo (o zero é real), então
+  só muda o comportamento na inferência com dado parcial.
+  Custo assumido: quanto menos campo chega, mais a predição se apoia no perfil mediano do
+  treino, e a resposta não diz o quanto. Vale registrar que payload vazio não devolve a
+  taxa base (0,079 medido contra prevalência de 0,329 no pipeline sintético), então o
+  número parece confiável mesmo sem informação nenhuma. Quantificar isso é o mesmo
+  trabalho de data drift adiado para o monitoramento.
 - **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
   versionado, logo o CI não o tem. Os testes de API e de predição
   (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":

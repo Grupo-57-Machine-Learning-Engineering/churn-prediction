@@ -79,6 +79,13 @@ uv run uvicorn src.api.main:app --reload
 - Documentação interativa (Swagger): <http://127.0.0.1:8000/docs>. Dá pra testar o
   `/predict` pelo navegador, com o payload de exemplo já preenchido.
 - Healthcheck: `curl http://127.0.0.1:8000/health` responde `{"status":"ok"}`
+- Amostra pronta: `curl http://127.0.0.1:8000/sample`
+
+O jeito mais rápido de ver a API funcionando é o `GET /sample`. Ele devolve cinco clientes
+de exemplo já pontuados, cada um com o `payload` completo e o `resultado` do modelo, e os
+perfis cobrem os dois extremos de risco, cliente sem internet, ficha incompleta e
+categoria que o modelo nunca viu. O `payload` de qualquer um deles pode ser colado no
+`POST /predict` e devolve exatamente os mesmos números, o que é garantido por teste.
 
 Exemplo de predição (payload completo no Contrato 3 de `docs/decisions.md`):
 
@@ -132,6 +139,16 @@ valor como desconhecido. A decisão está no ADR-006: o score serve de gatilho p
 sistemas, então derrubar o request por causa de categoria nova sairia mais caro que
 pontuar com uma informação a menos. Identificar esse tipo de mudança é trabalho do
 monitoramento de data drift, previsto para a etapa seguinte.
+
+Todos os campos são opcionais, então ficha incompleta também é pontuada: o pipeline imputa
+o que faltar. Quanto menos informação chega, mais a predição se apoia no perfil mediano do
+treino, e isso não aparece na resposta, então vale mandar tudo que se souber do cliente.
+
+Cuidado com uma diferença de significado em `services_avg_monthly_gb_download` e
+`services_avg_monthly_long_distance_charges`: zero quer dizer que o cliente **não tem** o
+serviço, enquanto omitir o campo quer dizer que o dado não veio. Mandar zero por não saber
+o valor puxa a predição para baixo, já que não ter internet é o fator de proteção mais
+forte da base. Na dúvida, omita o campo em vez de mandar zero.
 
 No PowerShell o heredoc acima não existe. Use o Swagger em `/docs`, ou salve o JSON num
 arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d "@payload.json"`.

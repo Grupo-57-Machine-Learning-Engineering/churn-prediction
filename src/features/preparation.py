@@ -138,7 +138,18 @@ class EngenhariaEstrutural(BaseEstimator, TransformerMixin):
             for coluna, nome_flag in cfg.ZEROS_ESTRUTURAIS.items():
                 if coluna in X.columns:
                     valores = pd.to_numeric(X[coluna], errors="coerce")
-                    X[nome_flag] = (valores.fillna(0) == 0).astype(int)
+                    # Ausente nao e zero. Zero aqui significa "nao tem o servico",
+                    # entao tratar nulo como zero afirmaria que o cliente nao tem
+                    # internet ou telefone so porque o dado nao veio, e "sem
+                    # internet" e o fator de protecao mais forte da base (7,4% de
+                    # churn contra 31,8%). O nulo segue nulo e o SimpleImputer do
+                    # ColumnTransformer decide o que fazer, com add_indicator
+                    # avisando o modelo de que aquilo veio faltando.
+                    # Na base de treino essas colunas nunca sao nulas (o zero e
+                    # real), entao esta linha nao muda nada do que o modelo
+                    # aprendeu, so o comportamento na inferencia com dado parcial.
+                    flag = (valores == 0).astype("float64")
+                    X[nome_flag] = flag.where(valores.notna())
 
         if self.criar_delta_cobranca:
             X = self._delta_cobranca(X)

@@ -105,12 +105,35 @@ def test_predict_aceita_categoria_nova_em_qualquer_coluna(client, payload_valido
     assert resposta.status_code == 200
 
 
-def test_predict_campo_faltando_da_422(client, payload_valido):
+def test_predict_aceita_campo_ausente(client, payload_valido):
+    """Ficha incompleta continua sendo pontuada (ADR-006)."""
     payload_valido.pop("demographics_age")
+    payload_valido.pop("services_online_security")
 
     resposta = client.post("/predict", json=payload_valido)
 
-    assert resposta.status_code == 422
+    assert resposta.status_code == 200
+    assert 0.0 <= resposta.json()["probability"] <= 1.0
+
+
+def test_predict_aceita_payload_vazio(client):
+    """Caso extremo do opcional: sem nenhuma informação ainda sai um número."""
+    resposta = client.post("/predict", json={})
+
+    assert resposta.status_code == 200
+    assert 0.0 <= resposta.json()["probability"] <= 1.0
+
+
+def test_predict_campo_ausente_equivale_a_nulo_explicito(client, payload_valido):
+    """Omitir e mandar null são a mesma informação, então dão o mesmo número."""
+    omitido = {k: v for k, v in payload_valido.items() if k != "demographics_gender"}
+    explicito = dict(payload_valido, demographics_gender=None)
+
+    r_omitido = client.post("/predict", json=omitido)
+    r_explicito = client.post("/predict", json=explicito)
+
+    assert r_omitido.status_code == r_explicito.status_code == 200
+    assert r_omitido.json()["probability"] == r_explicito.json()["probability"]
 
 
 def test_predict_valor_numerico_invalido_da_422(client, payload_valido):
@@ -149,6 +172,56 @@ def test_predict_rejeita_services_offer(client, payload_valido):
 
 def test_predict_sem_modelo_da_503(client_sem_modelo, payload_valido):
     resposta = client_sem_modelo.post("/predict", json=payload_valido)
+
+    assert resposta.status_code == 503
+    assert "champion_model.joblib" in resposta.json()["detail"]
+
+
+# --------------------------------------------------------------------------
+# GET /sample
+# --------------------------------------------------------------------------
+
+
+def test_sample_retorna_amostra_pontuada(client):
+    resposta = client.get("/sample")
+
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["total"] == len(corpo["clientes"]) > 0
+    assert corpo["threshold"] == THRESHOLD_DECISAO
+
+    for cliente in corpo["clientes"]:
+        assert cliente["nome"] and cliente["descricao"]
+        assert 0.0 <= cliente["resultado"]["probability"] <= 1.0
+        assert cliente["resultado"]["churn"] == (
+            cliente["resultado"]["probability"] >= THRESHOLD_DECISAO
+        )
+
+
+def test_sample_cobre_os_perfis_documentados(client):
+    nomes = {c["nome"] for c in client.get("/sample").json()["clientes"]}
+
+    assert {"ficha_incompleta", "categoria_nova", "sem_internet"} <= nomes
+
+
+def test_sample_bate_com_predict(client):
+    """A validação que o grupo pediu: o número do GET tem que sair igual no POST.
+
+    Vale para todos os perfis da amostra, incluindo o de ficha incompleta e o
+    de categoria desconhecida, que são os casos onde o caminho do dado é menos
+    óbvio.
+    """
+    amostra = client.get("/sample").json()
+
+    for cliente in amostra["clientes"]:
+        resposta = client.post("/predict", json=cliente["payload"])
+
+        assert resposta.status_code == 200, cliente["nome"]
+        assert resposta.json() == cliente["resultado"], cliente["nome"]
+
+
+def test_sample_sem_modelo_da_503(client_sem_modelo):
+    resposta = client_sem_modelo.get("/sample")
 
     assert resposta.status_code == 503
     assert "champion_model.joblib" in resposta.json()["detail"]
