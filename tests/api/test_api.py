@@ -81,25 +81,57 @@ def test_predict_cliente_sem_internet(client, payload_valido):
     assert resposta.status_code == 200
 
 
-def test_predict_categoria_invalida_da_422(client, payload_valido):
+def test_predict_aceita_categoria_nova(client, payload_valido):
+    """Categoria que o modelo nunca viu segue pontuando (ADR-006).
+
+    O score alimenta outros sistemas, então plano novo da operadora não pode
+    virar indisponibilidade. Quem absorve o valor desconhecido é o
+    `handle_unknown` do OneHotEncoder.
+    """
     payload_valido["services_contract"] = "Weekly"
 
     resposta = client.post("/predict", json=payload_valido)
 
-    assert resposta.status_code == 422
+    assert resposta.status_code == 200
+    assert 0.0 <= resposta.json()["probability"] <= 1.0
 
 
-def test_predict_valida_dominio_de_toda_categorica(client, payload_valido):
-    """Regra uniforme do review: valor desconhecido da 422 em qualquer coluna."""
+def test_predict_aceita_categoria_nova_em_qualquer_coluna(client, payload_valido):
     payload_valido["services_payment_method"] = "Pix"
+    payload_valido["services_internet_type"] = "5G"
+
+    resposta = client.post("/predict", json=payload_valido)
+
+    assert resposta.status_code == 200
+
+
+def test_predict_campo_faltando_da_422(client, payload_valido):
+    payload_valido.pop("demographics_age")
 
     resposta = client.post("/predict", json=payload_valido)
 
     assert resposta.status_code == 422
 
 
-def test_predict_campo_faltando_da_422(client, payload_valido):
-    payload_valido.pop("demographics_age")
+def test_predict_valor_numerico_invalido_da_422(client, payload_valido):
+    """Flexível com categoria nova, rígido com número que não descreve cliente."""
+    payload_valido["demographics_age"] = -5
+
+    resposta = client.post("/predict", json=payload_valido)
+
+    assert resposta.status_code == 422
+
+
+def test_predict_cobranca_negativa_da_422(client, payload_valido):
+    payload_valido["services_monthly_charge"] = -10.0
+
+    resposta = client.post("/predict", json=payload_valido)
+
+    assert resposta.status_code == 422
+
+
+def test_predict_tipo_errado_da_422(client, payload_valido):
+    payload_valido["services_tenure_in_months"] = "doze"
 
     resposta = client.post("/predict", json=payload_valido)
 

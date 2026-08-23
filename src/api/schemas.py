@@ -12,22 +12,28 @@ vez de ter o campo ignorado em silêncio. Identificadores, constantes,
 geografia, redundantes e as colunas `status_*` também nunca são input de
 predição (ver Contrato 2).
 
-Sobre os domínios categóricos: todos os campos validam domínio fechado
-via `Literal`, espelhando o dicionário da IBM (Contrato 1). Valor fora da
-lista devolve 422, sem exceção. A regra é uniforme de propósito, pedido do
-review da Etapa 3: o rascunho inicial deixava `services_payment_method`
-como texto livre e as demais fechadas, e a mistura confundia. O
-`handle_unknown` do pipeline continua existindo como segunda linha de
-defesa, mas o caminho esperado é a validação barrar antes.
+Sobre os domínios categóricos: as colunas de texto aceitam qualquer
+string, e não uma lista fechada de valores. A decisão é do review da
+Etapa 3 (ver ADR-006) e o motivo é operacional: o score do modelo tende a
+ser gatilho de outros sistemas, então travar o request porque a operadora
+lançou um plano novo transforma um problema de dado num problema de
+disponibilidade. Categoria desconhecida cai no
+`OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline e a
+predição sai normalmente, com a ressalva de que ela ignora o que aquele
+valor novo significa. Detectar esse caso é assunto de monitoramento de
+data drift, planejado para a etapa seguinte.
+
+O que continua barrado com 422 é dado inválido de fato: idade negativa,
+cobrança negativa, campo faltando, tipo errado. Esse tipo de payload não
+descreve cliente nenhum, então não faz sentido pontuar.
+
+Os valores conhecidos da base seguem documentados nas descrições dos
+campos, para o Swagger continuar servindo de guia de quem consome.
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
-
-SimNao = Literal["Yes", "No"]
 
 _EXEMPLO_REQUEST = {
     "demographics_gender": "Female",
@@ -60,6 +66,8 @@ _EXEMPLO_REQUEST = {
     "services_total_extra_data_charges": 0,
 }
 
+_SIM_NAO = "Valores da base: 'Yes' ou 'No'."
+
 
 class ChurnRequest(BaseModel):
     """Um cliente no formato pós-ETL (Contrato 1), pronto para o pipeline."""
@@ -69,35 +77,40 @@ class ChurnRequest(BaseModel):
         json_schema_extra={"examples": [_EXEMPLO_REQUEST]},
     )
 
-    demographics_gender: Literal["Male", "Female"]
+    demographics_gender: str = Field(description="Valores da base: 'Male' ou 'Female'.")
     demographics_age: int = Field(ge=0, le=120)
-    demographics_senior_citizen: SimNao
-    demographics_married: SimNao
-    demographics_dependents: SimNao
+    demographics_senior_citizen: str = Field(description=_SIM_NAO)
+    demographics_married: str = Field(description=_SIM_NAO)
+    demographics_dependents: str = Field(description=_SIM_NAO)
     demographics_number_of_dependents: int = Field(ge=0)
     services_number_of_referrals: int = Field(ge=0)
     services_tenure_in_months: int = Field(ge=0)
-    services_phone_service: SimNao
+    services_phone_service: str = Field(description=_SIM_NAO)
     services_avg_monthly_long_distance_charges: float = Field(ge=0)
-    services_multiple_lines: SimNao
-    services_internet_type: Literal["Cable", "DSL", "Fiber Optic"] | None = Field(
+    services_multiple_lines: str = Field(description=_SIM_NAO)
+    services_internet_type: str | None = Field(
         description=(
-            "null = cliente sem internet; vira a categoria 'No Internet Service' "
+            "Valores da base: 'Cable', 'DSL' ou 'Fiber Optic'. Use null para "
+            "cliente sem internet, que vira a categoria 'No Internet Service' "
             "dentro do pipeline (EngenhariaEstrutural)."
         )
     )
     services_avg_monthly_gb_download: float = Field(ge=0)
-    services_online_security: SimNao
-    services_online_backup: SimNao
-    services_device_protection_plan: SimNao
-    services_premium_tech_support: SimNao
-    services_streaming_tv: SimNao
-    services_streaming_movies: SimNao
-    services_streaming_music: SimNao
-    services_unlimited_data: SimNao
-    services_contract: Literal["Month-to-Month", "One Year", "Two Year"]
-    services_paperless_billing: SimNao
-    services_payment_method: Literal["Bank Withdrawal", "Credit Card", "Mailed Check"]
+    services_online_security: str = Field(description=_SIM_NAO)
+    services_online_backup: str = Field(description=_SIM_NAO)
+    services_device_protection_plan: str = Field(description=_SIM_NAO)
+    services_premium_tech_support: str = Field(description=_SIM_NAO)
+    services_streaming_tv: str = Field(description=_SIM_NAO)
+    services_streaming_movies: str = Field(description=_SIM_NAO)
+    services_streaming_music: str = Field(description=_SIM_NAO)
+    services_unlimited_data: str = Field(description=_SIM_NAO)
+    services_contract: str = Field(
+        description="Valores da base: 'Month-to-Month', 'One Year' ou 'Two Year'."
+    )
+    services_paperless_billing: str = Field(description=_SIM_NAO)
+    services_payment_method: str = Field(
+        description="Valores da base: 'Bank Withdrawal', 'Credit Card' ou 'Mailed Check'."
+    )
     services_monthly_charge: float = Field(ge=0)
     services_total_charges: float = Field(ge=0)
     services_total_refunds: float = Field(ge=0)

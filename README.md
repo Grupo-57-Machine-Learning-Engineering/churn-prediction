@@ -122,8 +122,16 @@ EOF
 Resposta: `{"churn": true|false, "probability": 0.0 a 1.0, "model_version": "0.1.0"}`.
 A probabilidade é a propensão de churn no snapshot atual, sem horizonte temporal
 (ADR-005); a classe usa o threshold padrão 0,5 (`src/config.py:THRESHOLD_DECISAO`,
-ADR-006). Payload inválido devolve 422: tipo ou domínio errado, campo faltando ou campo
-extra, incluindo `services_offer`, que está em quarentena por suspeita de vazamento.
+ADR-006). Payload inválido devolve 422: tipo errado, campo faltando, número fora de faixa
+(idade ou cobrança negativa) ou campo extra, incluindo `services_offer`, que está em
+quarentena por suspeita de vazamento.
+
+As colunas de texto aceitam qualquer valor. Se chegar uma categoria que o modelo não viu
+no treino, como um plano novo da operadora, a API pontua mesmo assim e o pipeline trata o
+valor como desconhecido. A decisão está no ADR-006: o score serve de gatilho para outros
+sistemas, então derrubar o request por causa de categoria nova sairia mais caro que
+pontuar com uma informação a menos. Identificar esse tipo de mudança é trabalho do
+monitoramento de data drift, previsto para a etapa seguinte.
 
 No PowerShell o heredoc acima não existe. Use o Swagger em `/docs`, ou salve o JSON num
 arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d "@payload.json"`.

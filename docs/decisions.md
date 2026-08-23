@@ -170,10 +170,13 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
 
 `services_payment_method`: o exemplo anterior usava `"Electronic Check"`, que é domínio do
 CSV do Kaggle de 21 colunas (fonte descartada pelo ADR-003). Na base real da IBM os
-valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`, e o schema valida esse
-domínio do mesmo jeito que valida as demais categóricas: valor fora da lista devolve 422.
-A regra ficou uniforme para todas as colunas por decisão do grupo no review da Etapa 3
-(o rascunho inicial deixava este campo como texto livre e o restante fechado).
+valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`.
+
+**Colunas categóricas aceitam qualquer string.** Os valores acima são os que existem na
+base e ficam documentados na descrição de cada campo (visíveis no Swagger), mas não são
+uma lista fechada: categoria nova passa pela validação e é absorvida pelo
+`OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline. Decisão do review da
+Etapa 3, detalhada no ADR-006.
 
 ```jsonc
 // Response (ChurnResponse)
@@ -186,7 +189,9 @@ A regra ficou uniforme para todas as colunas por decisão do grupo no review da 
 }
 ```
 
-- Validação de tipos e domínios via Pydantic; categorias inválidas → HTTP 422.
+- Validação de tipos e faixas via Pydantic: tipo errado, campo faltando, idade ou valor
+  monetário negativo devolvem HTTP 422. Categoria de texto desconhecida **não** devolve
+  422, pontua normalmente (ADR-006).
 - Campos extras também dão 422 (`extra="forbid"`): em particular `services_offer`, em
   quarentena por suspeita de vazamento (notebook 03 §5.2), é rejeitada explicitamente em
   vez de silenciosamente ignorada.
@@ -342,12 +347,24 @@ A regra ficou uniforme para todas as colunas por decisão do grupo no review da 
   `RandomForest`), então imputação, escala e one-hot acontecem dentro dele, e o
   `DescartadorDeColunas` já foi desenhado para tolerar o payload reduzido de 28 colunas.
   Rodar o ETL de junção dentro da API não faz sentido para predição de cliente único.
-- **Decisão (validação uniforme, pós-review):** toda coluna categórica valida domínio
-  fechado no Pydantic e devolve 422 para valor desconhecido, sem exceção. O rascunho do PR
-  deixava `services_payment_method` como texto livre enquanto as demais eram fechadas, e o
-  review pediu consistência: uma regra só é mais fácil de explicar, testar e consumir. O
-  `handle_unknown="infrequent_if_exist"` do pipeline segue como segunda linha de defesa,
-  não como caminho esperado de entrada.
+- **Decisão (validação, pós-review):** categórica é `str` livre, numérica é validada por
+  faixa. O rascunho do PR usava `Literal` com domínio fechado nas categóricas, e o review
+  levantou dois problemas. Primeiro, consistência: `services_payment_method` tinha ficado
+  livre enquanto o resto era fechado, então valor desconhecido dava 422 em algumas colunas
+  e passava em outras. Segundo, e mais importante, o efeito operacional de barrar: o score
+  de um modelo costuma ser gatilho de vários sistemas a jusante, e recusar o request
+  porque a operadora lançou um plano novo transforma uma questão de dado numa
+  indisponibilidade em cascata. Também não se justifica deixar de pontuar um cliente só
+  porque uma informação dele veio diferente do esperado.
+  A regra que ficou: texto desconhecido é aceito e absorvido pelo
+  `OneHotEncoder(handle_unknown="infrequent_if_exist")`, que já era o comportamento do
+  treino; dado que não descreve cliente nenhum (tipo errado, campo faltando, idade ou
+  cobrança negativa) continua devolvendo 422. Os valores conhecidos da base seguem
+  documentados na descrição de cada campo, então o Swagger continua guiando quem consome.
+  O custo assumido é que a predição com categoria nova ignora o significado daquele valor,
+  sem sinalizar isso na resposta. Sinalizar é justamente o trabalho de detecção de data
+  drift, que o grupo decidiu tratar na etapa de monitoramento (ver `monitoring_plan.md`,
+  ainda a criar) em vez de improvisar um aviso no payload agora.
 - **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
   versionado, logo o CI não o tem. Os testes de API e de predição
   (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":
