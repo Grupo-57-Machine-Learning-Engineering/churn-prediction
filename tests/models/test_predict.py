@@ -7,11 +7,21 @@ import pandas as pd
 import pytest
 
 from src import config
-from src.models.predict import ModeloIndisponivelError, carregar_campeao, prever
+from src.models.predict import (
+    ORIGEM_LOCAL,
+    Campeao,
+    ModeloIndisponivelError,
+    carregar_campeao,
+    prever,
+)
 
 
 def _sem_mlflow(monkeypatch):
-    """Desliga o fallback do MLflow, mesmo que o .env local esteja preenchido."""
+    """Desliga a fonte MLflow, mesmo que o .env local esteja preenchido.
+
+    Sem isso, quem tem `.env` configurado testa contra o registry de verdade:
+    o MLflow é a primeira fonte, então ele responderia antes do joblib.
+    """
     for atributo in (
         "MLFLOW_TRACKING_URI",
         "MLFLOW_TRACKING_USERNAME",
@@ -22,14 +32,16 @@ def _sem_mlflow(monkeypatch):
         monkeypatch.setattr(config, atributo, None)
 
 
-def test_carregar_campeao_do_joblib(tmp_path, campeao_sintetico, payload_valido):
-    """Fluxo completo: salva o joblib, carrega de volta e faz a predição."""
+def test_carregar_campeao_do_joblib(tmp_path, campeao_sintetico, payload_valido, monkeypatch):
+    """Fluxo completo pelo fallback: salva o joblib, carrega de volta e prevê."""
+    _sem_mlflow(monkeypatch)
     caminho = tmp_path / "champion_model.joblib"
     joblib.dump(campeao_sintetico, caminho)
 
-    modelo = carregar_campeao(caminho)
-    resultado = prever(modelo, pd.DataFrame([payload_valido]))
+    campeao = carregar_campeao(caminho)
+    resultado = prever(campeao.modelo, pd.DataFrame([payload_valido]))
 
+    assert campeao.origem == ORIGEM_LOCAL
     assert len(resultado) == 1
     assert 0.0 <= resultado[0]["probability"] <= 1.0
     assert isinstance(resultado[0]["churn"], bool)
@@ -53,14 +65,13 @@ def test_carregar_campeao_prioriza_mlflow_sobre_joblib_local(
     caminho = tmp_path / "champion_model.joblib"
     joblib.dump("modelo_local_desatualizado", caminho)
 
-    monkeypatch.setattr(config, "MLFLOW_TRACKING_URI", "https://dagshub.com/fake")
-    monkeypatch.setattr(config, "MLFLOW_TRACKING_USERNAME", "fake")
-    monkeypatch.setattr(config, "MLFLOW_TRACKING_PASSWORD", "fake")
-    monkeypatch.setattr("src.models.predict._carregar_do_mlflow", lambda: campeao_sintetico)
+    do_registry = Campeao(campeao_sintetico, "mlflow:churn_champion/7")
+    monkeypatch.setattr("src.models.predict._carregar_do_mlflow", lambda: do_registry)
 
-    modelo = carregar_campeao(caminho)
+    campeao = carregar_campeao(caminho)
 
-    assert modelo is campeao_sintetico
+    assert campeao.modelo is campeao_sintetico
+    assert campeao.origem == "mlflow:churn_champion/7"
 
 
 def test_prever_respeita_threshold(campeao_sintetico, payload_valido):

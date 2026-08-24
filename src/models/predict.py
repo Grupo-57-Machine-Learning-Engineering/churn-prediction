@@ -20,6 +20,7 @@ em `docs/decisions.md`: não tem pré-processamento manual antes de chamar
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import joblib
 import pandas as pd
@@ -29,14 +30,34 @@ from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-__all__ = ["ModeloIndisponivelError", "carregar_campeao", "prever"]
+__all__ = ["Campeao", "ModeloIndisponivelError", "carregar_campeao", "prever"]
+
+ORIGEM_LOCAL = "joblib-local"
+"""Origem reportada quando o modelo veio do artefato em disco.
+
+Sem número de versão de propósito: o `.joblib` não carrega essa informação,
+e inventar uma (data do arquivo, hash) daria falsa sensação de rastreio.
+"""
+
+
+class Campeao(NamedTuple):
+    """Modelo carregado junto com a origem de onde ele veio.
+
+    A origem vai para o `model_source` da resposta (Contrato 3). Ela existe
+    porque, com o registry na frente do joblib, o modelo que responde pode
+    mudar sem o pacote mudar de versão: sem esse campo a resposta não diria
+    qual dos dois respondeu (ADR-006).
+    """
+
+    modelo: Any
+    origem: str
 
 
 class ModeloIndisponivelError(RuntimeError):
     """Nenhuma fonte conseguiu fornecer o modelo campeão."""
 
 
-def carregar_campeao(caminho: Path | str | None = None):
+def carregar_campeao(caminho: Path | str | None = None) -> Campeao:
     """Carrega o pipeline campeão: MLflow primeiro, joblib local como fallback.
 
     Parameters
@@ -46,21 +67,26 @@ def carregar_campeao(caminho: Path | str | None = None):
         não estiver disponível. `None` usa o padrão do projeto
         (`config.CHAMPION_MODEL_PATH`).
 
+    Returns
+    -------
+    Campeao
+        O modelo e a origem de onde ele veio.
+
     Raises
     ------
     ModeloIndisponivelError
         Se o MLflow não está configurado (ou falhou) e o arquivo local
         também não existe.
     """
-    modelo = _carregar_do_mlflow()
-    if modelo is not None:
-        return modelo
+    campeao = _carregar_do_mlflow()
+    if campeao is not None:
+        return campeao
 
     caminho = Path(caminho) if caminho is not None else config.CHAMPION_MODEL_PATH
 
     if caminho.exists():
         logger.info("Carregando modelo campeão do artefato local: %s", caminho)
-        return joblib.load(caminho)
+        return Campeao(joblib.load(caminho), ORIGEM_LOCAL)
 
     raise ModeloIndisponivelError(
         "Modelo campeão não encontrado no MLflow (tracking não configurado ou "
@@ -70,12 +96,16 @@ def carregar_campeao(caminho: Path | str | None = None):
     )
 
 
-def _carregar_do_mlflow():
+def _carregar_do_mlflow() -> Campeao | None:
     """Tenta baixar o campeão do Model Registry. Devolve `None` se não der.
 
     É best-effort de propósito: a API precisa subir e responder o `/health`
     mesmo sem DagsHub configurado. Quando o modelo falta, quem lida com isso
     é o `/predict`, respondendo 503 (ver `src/api/main.py`).
+
+    O tempo limite das chamadas HTTP vem do `MLFLOW_HTTP_REQUEST_TIMEOUT`
+    (ver `.env.example`). Sem ele, um DagsHub lento não levanta exceção nem
+    cai no fallback, ele só não termina, e segura o startup da API.
     """
     tem_token = all(
         (
@@ -93,10 +123,31 @@ def _carregar_do_mlflow():
 
         config.configurar_mlflow_tracking()
         logger.info("Baixando modelo campeão do registry: %s", config.CHAMPION_MODEL_URI)
-        return mlflow.sklearn.load_model(config.CHAMPION_MODEL_URI)
+        modelo = mlflow.sklearn.load_model(config.CHAMPION_MODEL_URI)
+        return Campeao(modelo, f"mlflow:{config.CHAMPION_MODEL_NAME}/{_versao_no_registry()}")
     except Exception as erro:  # pragma: no cover - depende de rede/credencial
-        logger.warning("Fallback via MLflow falhou: %s", erro)
+        logger.warning("Carregamento via MLflow falhou, tentando o joblib local: %s", erro)
         return None
+
+
+def _versao_no_registry() -> str:
+    """Número da versão que está com o alias `@champion` agora.
+
+    Best-effort e chamada só depois do modelo já ter carregado: se resolver o
+    alias falhar, o modelo continua servindo e a origem sai com a versão
+    marcada como desconhecida, em vez de derrubar o carregamento por causa de
+    um rótulo.
+    """
+    try:
+        from mlflow import MlflowClient
+
+        versao = MlflowClient().get_model_version_by_alias(
+            config.CHAMPION_MODEL_NAME, config.CHAMPION_MODEL_ALIAS
+        )
+        return str(versao.version)
+    except Exception as erro:  # pragma: no cover - depende de rede/credencial
+        logger.warning("Não consegui resolver a versão do alias @champion: %s", erro)
+        return "desconhecida"
 
 
 def prever(

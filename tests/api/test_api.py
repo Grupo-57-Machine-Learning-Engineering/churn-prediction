@@ -12,13 +12,18 @@ from fastapi.testclient import TestClient
 
 from src.api.main import app
 from src.config import THRESHOLD_DECISAO
-from src.models.predict import ModeloIndisponivelError
+from src.models.predict import Campeao, ModeloIndisponivelError
+
+ORIGEM_DE_TESTE = "mlflow:churn_champion/42"
 
 
 @pytest.fixture
 def client(campeao_sintetico, monkeypatch):
     """TestClient com o campeão sintético injetado no lugar do artefato real."""
-    monkeypatch.setattr("src.api.main.carregar_campeao", lambda: campeao_sintetico)
+    monkeypatch.setattr(
+        "src.api.main.carregar_campeao",
+        lambda: Campeao(campeao_sintetico, ORIGEM_DE_TESTE),
+    )
     with TestClient(app) as client:
         yield client
 
@@ -65,10 +70,11 @@ def test_predict_payload_valido(client, payload_valido):
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert set(corpo) == {"churn", "probability", "model_version"}
+    assert set(corpo) == {"churn", "probability", "model_version", "model_source"}
     assert 0.0 <= corpo["probability"] <= 1.0
     assert corpo["churn"] == (corpo["probability"] >= THRESHOLD_DECISAO)
     assert isinstance(corpo["model_version"], str) and corpo["model_version"]
+    assert corpo["model_source"] == ORIGEM_DE_TESTE
 
 
 def test_predict_cliente_sem_internet(client, payload_valido):
@@ -196,6 +202,19 @@ def test_sample_retorna_amostra_pontuada(client):
         assert cliente["resultado"]["churn"] == (
             cliente["resultado"]["probability"] >= THRESHOLD_DECISAO
         )
+
+
+def test_sample_reporta_a_origem_do_campeao(client):
+    """`model_source` diz de onde o modelo veio, no topo e em cada cliente.
+
+    Com o registry na frente do joblib (ADR-006), o modelo servido pode mudar
+    sem o pacote mudar de versão, então `model_version` sozinho não identifica
+    quem respondeu.
+    """
+    corpo = client.get("/sample").json()
+
+    assert corpo["model_source"] == ORIGEM_DE_TESTE
+    assert {c["resultado"]["model_source"] for c in corpo["clientes"]} == {ORIGEM_DE_TESTE}
 
 
 def test_sample_cobre_os_perfis_documentados(client):

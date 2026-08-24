@@ -16,14 +16,15 @@ garantindo isso.
 
 Tratamento de erro: payload inválido (tipo errado, campo faltando, número
 fora de faixa, campo extra como `services_offer`) vira 422, gerado pelo
-próprio Pydantic/FastAPI. Modelo indisponível (sem
-`models/champion_model.joblib` e sem MLflow configurado) vira 503 com
-instrução de como obter o artefato. Falha inesperada durante a predição
-vira 500 com mensagem limpa, e o detalhe fica só no log.
+próprio Pydantic/FastAPI. Modelo indisponível (sem MLflow configurado e sem
+`models/champion_model.joblib`) vira 503 com instrução de como obter o
+artefato. Falha inesperada durante a predição vira 500 com mensagem limpa,
+e o detalhe fica só no log.
 
 O modelo é carregado uma única vez no startup (lifespan) e reutilizado em
-todas as requisições. Carregar um RandomForest do disco a cada request
-inviabilizaria a latência.
+todas as requisições. Carregar um RandomForest a cada request inviabilizaria
+a latência. A contrapartida é que promover um campeão novo no Model Registry
+só passa a valer no próximo restart do processo (ver ADR-006).
 
 Rodar localmente: `uv run uvicorn src.api.main:app --reload` (ver README).
 """
@@ -54,10 +55,15 @@ _DETALHE_SEM_MODELO = (
 async def lifespan(app: FastAPI):
     """Carrega o campeão no startup; a ausência dele não derruba a API."""
     try:
-        app.state.modelo = carregar_campeao()
+        campeao = carregar_campeao()
     except ModeloIndisponivelError as erro:
         logger.warning("API subiu sem modelo: %s", erro)
         app.state.modelo = None
+        app.state.model_source = None
+    else:
+        app.state.modelo = campeao.modelo
+        app.state.model_source = campeao.origem
+        logger.info("Campeão carregado de %s", campeao.origem)
     yield
 
 
@@ -79,6 +85,15 @@ def _modelo_ou_503(request: Request):
     if modelo is None:
         raise HTTPException(status_code=503, detail=_DETALHE_SEM_MODELO)
     return modelo
+
+
+def _origem(request: Request) -> str:
+    """Origem do campeão em memória, para o `model_source` da resposta.
+
+    Só faz sentido depois do `_modelo_ou_503`: modelo e origem são gravados
+    juntos no lifespan, então quem tem um tem o outro.
+    """
+    return request.app.state.model_source
 
 
 def _prever_ou_500(modelo, dados) -> dict:
@@ -114,6 +129,7 @@ def predict(payload: ChurnRequest, request: Request) -> ChurnResponse:
         churn=resultado["churn"],
         probability=resultado["probability"],
         model_version=__version__,
+        model_source=_origem(request),
     )
 
 
@@ -145,6 +161,7 @@ def sample(request: Request) -> SampleResponse:
                     churn=resultado["churn"],
                     probability=resultado["probability"],
                     model_version=__version__,
+                    model_source=_origem(request),
                 ),
             )
         )
@@ -153,5 +170,6 @@ def sample(request: Request) -> SampleResponse:
         total=len(clientes),
         threshold=THRESHOLD_DECISAO,
         model_version=__version__,
+        model_source=_origem(request),
         clientes=clientes,
     )

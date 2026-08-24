@@ -71,6 +71,10 @@ versionado, e há duas formas de obtê-lo:
 Sem nenhuma das duas, a API sobe mesmo assim: `GET /health` responde `ok` e
 `POST /predict` devolve 503 explicando o que falta.
 
+O campeão é lido uma vez, no startup, e a resposta traz em `model_source` de onde ele
+veio (`mlflow:churn_champion/13` ou `joblib-local`). Depois de promover uma versão nova
+no Model Registry, reinicie a API para ela passar a servir o modelo novo.
+
 **Subir o servidor:**
 
 ```bash

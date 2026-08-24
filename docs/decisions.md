@@ -205,14 +205,23 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
   "probability": 0.78, // float em [0, 1]: propensão a um comportamento de churn observável AGORA
   // (mesma definição do alvo, status_churn_value — snapshot, sem horizonte
   // temporal; não é "probabilidade de cancelar nos próximos N meses", ver ADR-005)
-  "model_version": "0.1.0", // versão do modelo usada
+  "model_version": "0.1.0", // versão do PACOTE que respondeu (src.__version__, commitizen).
+  // Identifica o código, incluindo o pré-processamento do pipeline.
+  "model_source": "mlflow:churn_champion/3", // de onde o campeão foi carregado no startup:
+  // "mlflow:churn_champion/<versao>" (Model Registry) ou "joblib-local" (artefato em disco).
+  // Existe porque o modelo servido pode mudar sem o pacote mudar de versão (ADR-006).
 }
 ```
+
+O `GET /sample` devolve `model_version` e `model_source` no topo, com os mesmos valores que
+aparecem no `resultado` de cada cliente. Os dois são lidos uma vez, no startup: a API não
+troca de modelo enquanto está no ar.
 
 - Validação de tipos e faixas via Pydantic: tipo errado, idade ou valor monetário negativo
   devolvem HTTP 422. Categoria de texto desconhecida e campo ausente **não** devolvem 422,
   pontuam normalmente (ADR-006).
-- Campos extras também dão 422 (`extra="forbid"`): em particular `services_offer`, em
+- Campos extras também dão 422 (`extra="forbid"`), decisão mantida no ADR-006: em
+  particular `services_offer`, em
   quarentena por suspeita de vazamento (notebook 03 §5.2), é rejeitada explicitamente em
   vez de silenciosamente ignorada.
 - Implementado na Etapa 3 (`src/api/schemas.py` + `src/api/main.py`, ver ADR-006). O mock
@@ -356,6 +365,13 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
   `.joblib` manualmente em todo ambiente de deploy. Sem nenhuma das duas fontes a API
   sobe mesmo assim: `/health` responde `ok` e `/predict` devolve 503 com instrução de
   como obter o artefato.
+  Custo assumido: o startup passou a depender de rede. O `MLFLOW_HTTP_REQUEST_TIMEOUT`
+  (ver `.env.example`) limita a espera, porque um DagsHub lento não levanta exceção nem
+  cai no fallback, ele só não termina e segura a subida da API. O startup medido em
+  desenvolvimento fica por volta de 7 segundos, número que também importa para o período
+  de carência de healthcheck em qualquer deploy conteinerizado. Recarregar o campeão sem
+  reiniciar o processo (endpoint administrativo ou checagem periódica do registry) ficou
+  de fora: com o modelo sendo treinado à mão, reiniciar é procedimento aceitável.
 - **Decisão (threshold de decisão):** mantido em 0,5 (`src/config.py:THRESHOLD_DECISAO`),
   o mesmo com que o campeão foi avaliado (métricas de negócio do ADR-004: sensibilidade
   0,813, precisão 0,624). O ajuste do trade-off entre sensibilidade e precisão segue como
@@ -378,7 +394,7 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
   Swagger continuar guiando quem consome. Custo assumido: a predição com categoria nova
   ignora o significado daquele valor, sem sinalizar isso na resposta — sinalizar é
   trabalho de detecção de data drift, que fica para a etapa de monitoramento
-  (`monitoring_plan.md`, ainda a criar).
+  (`monitoring_plan.md`).
 - **Decisão (campos opcionais):** nenhum campo do `POST /predict` é obrigatório. Quem
   consome nem sempre tem a ficha completa do cliente, e o pipeline foi construído para
   isso desde a Etapa 1, com `SimpleImputer(strategy="median", add_indicator=True)` nos
@@ -400,7 +416,28 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
   a mesma factory `build_pipeline()` de produção, fitada em segundos sobre uma base
   sintética com as 28 colunas do Contrato 3 (`tests/conftest.py`), injetada via
   monkeypatch no lugar do carregamento real.
-- **Consequências:** `model_version` da resposta reporta a versão do pacote
-  (`src.__version__`, gerida pelo commitizen), não a versão do Model Registry, por
-  simplicidade. Se o grupo quiser expor a versão do Registry, é mudança de contrato.
+- **Decisão (identificação do modelo servido):** a resposta ganhou `model_source`, campo
+  novo, ao lado do `model_version`. O `model_version` continua sendo `src.__version__`
+  (commitizen), que identifica o código: o pré-processamento vive em
+  `src/features/preparation.py` e é o pacote que determina como o dado chega no
+  estimador. O `model_source` diz de qual fonte o campeão veio, com a versão do Registry
+  quando aplicável (`mlflow:churn_champion/3` ou `joblib-local`). Motivo: com o registry
+  na frente do joblib, o modelo que responde passou a poder mudar sem o pacote mudar de
+  versão, então `model_version` sozinho deixou de identificar quem respondeu. Campo novo
+  em vez de redefinir o antigo porque as duas informações são reais e diferentes, e
+  porque adicionar não quebra quem já lê `model_version`. A versão do alias é resolvida
+  em chamada separada ao Registry, best-effort: se ela falhar o modelo continua servindo
+  e a origem sai como `mlflow:churn_champion/desconhecida`, já que rótulo não é motivo
+  para derrubar predição.
+- **Decisão (`extra="forbid"` fica):** campo desconhecido no `POST /predict` continua
+  devolvendo 422, mesmo depois de tudo o mais ter afrouxado. A assimetria é proposital.
+  Soltar as categóricas protege disponibilidade: valor novo numa coluna conhecida ainda
+  descreve o cliente, e o pipeline sabe absorver. Campo desconhecido é outra coisa, é
+  alguém mandando dado que a API não modela, e o caso concreto é o `services_offer`, em
+  quarentena por suspeita de vazamento (notebook 03 §5.2). Aceitar e ignorar em silêncio
+  seria o pior dos dois mundos: quem consome acharia que a informação entrou na predição.
+  Custo assumido: cliente que evoluir o schema antes da API toma 422 numa chamada que
+  teria funcionado ignorando o campo extra. É o custo que o grupo aceita para o
+  `services_offer` nunca entrar por descuido.
+- **Consequências:** o Contrato 3 mudou (campo novo na resposta), avisado no canal.
   Como rodar a API está no README, na seção "Rodando a API localmente".

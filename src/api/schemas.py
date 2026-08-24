@@ -183,7 +183,21 @@ class ChurnResponse(BaseModel):
             "porque a base tem trimestre único (ver ADR-005)."
         ),
     )
-    model_version: str = Field(description="Versão do modelo/pacote usada na predição.")
+    model_version: str = Field(
+        description=(
+            "Versão do pacote que respondeu (`src.__version__`, gerida pelo "
+            "commitizen). Identifica o código, incluindo o pré-processamento do "
+            "pipeline, não a versão do modelo no Model Registry."
+        )
+    )
+    model_source: str = Field(
+        description=(
+            "De onde o campeão foi carregado no startup: "
+            "`mlflow:churn_champion/<versao>` quando veio do Model Registry, "
+            "`joblib-local` quando veio do artefato em disco. Existe porque o "
+            "modelo servido pode mudar sem o pacote mudar de versão (ADR-006)."
+        )
+    )
 
 
 class ClienteExemplo(BaseModel):
@@ -202,5 +216,6 @@ class SampleResponse(BaseModel):
 
     total: int = Field(description="Quantidade de clientes na amostra.")
     threshold: float = Field(description="Threshold usado para converter probabilidade em classe.")
-    model_version: str = Field(description="Versão do modelo/pacote usada nas predições.")
+    model_version: str = Field(description="Versão do pacote que respondeu (`src.__version__`).")
+    model_source: str = Field(description="De onde o campeão foi carregado (ver `ChurnResponse`).")
     clientes: list[ClienteExemplo]

@@ -43,8 +43,14 @@ CHAMPION_MODEL_PATH: Path = MODELS_DIR / "champion_model.joblib"
 """Artefato local do campeão. O notebook 05 grava esse arquivo sempre, com ou
 sem MLflow no ar, porque ele é entregável explícito do enunciado (ADR-004)."""
 
-CHAMPION_MODEL_URI: str = "models:/churn_champion@champion"
-"""Endereço do campeão no Model Registry do MLflow/DagsHub (fallback da API)."""
+CHAMPION_MODEL_NAME: str = "churn_champion"
+"""Nome do modelo registrado no Model Registry do MLflow/DagsHub."""
+
+CHAMPION_MODEL_ALIAS: str = "champion"
+"""Alias que aponta para a versão campeã vigente (ADR-004)."""
+
+CHAMPION_MODEL_URI: str = f"models:/{CHAMPION_MODEL_NAME}@{CHAMPION_MODEL_ALIAS}"
+"""Endereço do campeão no Model Registry, fonte prioritária da API (ADR-006)."""
 
 THRESHOLD_DECISAO: float = 0.5
 """Threshold padrão para converter probabilidade em classe no `/predict`.
