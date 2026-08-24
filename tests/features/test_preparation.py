@@ -188,6 +188,23 @@ def test_flags_de_zero_estrutural(base):
     assert "flag_sem_telefone" in saida.columns
 
 
+def test_flag_de_zero_estrutural_nao_confunde_ausente_com_zero(base):
+    """Dado faltando não pode virar "cliente sem o serviço".
+
+    Zero em `avg_monthly_gb_download` significa que o cliente não tem
+    internet, que é o fator de proteção mais forte da base. Um nulo ali
+    significa apenas que o dado não veio, então a flag fica nula e quem
+    decide é o imputer, não o transformador.
+    """
+    base = base.copy()
+    base.loc[0, "services_avg_monthly_gb_download"] = np.nan
+
+    saida = EngenhariaEstrutural().fit_transform(base)
+
+    assert pd.isna(saida.loc[0, "flag_sem_internet"])
+    assert saida["flag_sem_internet"].iloc[1:].notna().all()
+
+
 def test_delta_cobranca_zero_quando_nao_ha_reajuste(base):
     """Na fixture total_charges == monthly * tenure por construcao."""
     saida = EngenhariaEstrutural().fit_transform(base)

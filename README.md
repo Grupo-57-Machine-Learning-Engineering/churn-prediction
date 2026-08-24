@@ -4,17 +4,14 @@ Previsão de churn de clientes (dataset Telco Customer Churn / IBM) com Scikit-L
 
 ## Estrutura
 
-Os módulos de `src/` estão criados mas ainda vazios — o comentário indica a
-responsabilidade planejada de cada um.
-
 ```
 churn-prediction/
 ├── src/
-│   ├── data/            # (a implementar) carregamento e split
-│   ├── features/        # (a implementar) transformadores custom do pipeline
-│   ├── models/          # (a implementar) baseline, ensemble e MLPClassifier
-│   ├── training/        # (a implementar) treino, validação cruzada e comparação
-│   ├── api/             # (a implementar) FastAPI: rotas, schemas Pydantic
+│   ├── data/            # ETL: extração das 5 planilhas IBM, merge, schema pandera
+│   ├── features/        # transformadores custom + build_pipeline() (Contrato 2)
+│   ├── models/          # carregamento do campeão e predição (Etapa 3)
+│   ├── training/        # (a implementar) treino como script — hoje vive no notebook 05
+│   ├── api/             # FastAPI: rotas e schemas Pydantic (Etapa 3)
 │   └── config.py        # seeds, paths, constantes
 ├── data/                # NÃO versionado (só local)
 ├── models/              # artefatos treinados (não versionado)
@@ -56,6 +53,110 @@ best-effort e só loga um aviso.
 pode falhar com `UnicodeEncodeError` ao tentar imprimir o link colorido — já corrigido
 em `src/config.py:configurar_mlflow_tracking()`, que força UTF-8 no console antes de
 chamar o DagsHub.
+
+## Rodando a API localmente
+
+A API de inferência (Etapa 3) serve o modelo campeão via FastAPI.
+
+Pré-requisito: o modelo campeão. O artefato `models/champion_model.joblib` não é
+versionado, e há duas formas de obtê-lo:
+
+1. Configurar o `.env` (ver seção de tracking acima): a API baixa
+   `models:/churn_champion@champion` do Model Registry do DagsHub sozinha no startup,
+   sempre a versão mais atual marcada como campeã; ou
+2. Rodar o notebook de modelagem (`notebooks/05_modelagem.ipynb`), que grava o joblib
+   local sempre, com ou sem MLflow no ar — usado como fallback quando o `.env` não está
+   configurado ou o MLflow está indisponível.
+
+Sem nenhuma das duas, a API sobe mesmo assim: `GET /health` responde `ok` e
+`POST /predict` devolve 503 explicando o que falta.
+
+O campeão é lido uma vez, no startup, e a resposta traz em `model_source` de onde ele
+veio (`mlflow:churn_champion/13` ou `joblib-local`). Depois de promover uma versão nova
+no Model Registry, reinicie a API para ela passar a servir o modelo novo.
+
+**Subir o servidor:**
+
+```bash
+uv run uvicorn src.api.main:app --reload
+```
+
+- Documentação interativa (Swagger): <http://127.0.0.1:8000/docs>. Dá pra testar o
+  `/predict` pelo navegador, com o payload de exemplo já preenchido.
+- Healthcheck: `curl http://127.0.0.1:8000/health` responde `{"status":"ok"}`
+- Amostra pronta: `curl http://127.0.0.1:8000/sample`
+
+O jeito mais rápido de ver a API funcionando é o `GET /sample`. Ele devolve cinco clientes
+de exemplo já pontuados, cada um com o `payload` completo e o `resultado` do modelo, e os
+perfis cobrem os dois extremos de risco, cliente sem internet, ficha incompleta e
+categoria que o modelo nunca viu. O `payload` de qualquer um deles pode ser colado no
+`POST /predict` e devolve exatamente os mesmos números, o que é garantido por teste.
+
+Exemplo de predição (payload completo no Contrato 3 de `docs/decisions.md`):
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @- <<'EOF'
+{
+  "demographics_gender": "Female",
+  "demographics_age": 34,
+  "demographics_senior_citizen": "No",
+  "demographics_married": "Yes",
+  "demographics_dependents": "No",
+  "demographics_number_of_dependents": 0,
+  "services_number_of_referrals": 0,
+  "services_tenure_in_months": 12,
+  "services_phone_service": "Yes",
+  "services_avg_monthly_long_distance_charges": 15.3,
+  "services_multiple_lines": "No",
+  "services_internet_type": "Fiber Optic",
+  "services_avg_monthly_gb_download": 24,
+  "services_online_security": "No",
+  "services_online_backup": "Yes",
+  "services_device_protection_plan": "No",
+  "services_premium_tech_support": "No",
+  "services_streaming_tv": "Yes",
+  "services_streaming_movies": "No",
+  "services_streaming_music": "No",
+  "services_unlimited_data": "Yes",
+  "services_contract": "Month-to-Month",
+  "services_paperless_billing": "Yes",
+  "services_payment_method": "Credit Card",
+  "services_monthly_charge": 79.85,
+  "services_total_charges": 958.2,
+  "services_total_refunds": 0.0,
+  "services_total_extra_data_charges": 0
+}
+EOF
+```
+
+Resposta: `{"churn": true|false, "probability": 0.0 a 1.0, "model_version": "0.1.0"}`.
+A probabilidade é a propensão de churn no snapshot atual, sem horizonte temporal
+(ADR-005); a classe usa o threshold padrão 0,5 (`src/config.py:THRESHOLD_DECISAO`,
+ADR-006). Payload inválido devolve 422: tipo errado, campo faltando, número fora de faixa
+(idade ou cobrança negativa) ou campo extra, incluindo `services_offer`, que está em
+quarentena por suspeita de vazamento.
+
+As colunas de texto aceitam qualquer valor. Se chegar uma categoria que o modelo não viu
+no treino, como um plano novo da operadora, a API pontua mesmo assim e o pipeline trata o
+valor como desconhecido. A decisão está no ADR-006: o score serve de gatilho para outros
+sistemas, então derrubar o request por causa de categoria nova sairia mais caro que
+pontuar com uma informação a menos. Identificar esse tipo de mudança é trabalho do
+monitoramento de data drift, previsto para a etapa seguinte.
+
+Todos os campos são opcionais, então ficha incompleta também é pontuada: o pipeline imputa
+o que faltar. Quanto menos informação chega, mais a predição se apoia no perfil mediano do
+treino, e isso não aparece na resposta, então vale mandar tudo que se souber do cliente.
+
+Cuidado com uma diferença de significado em `services_avg_monthly_gb_download` e
+`services_avg_monthly_long_distance_charges`: zero quer dizer que o cliente **não tem** o
+serviço, enquanto omitir o campo quer dizer que o dado não veio. Mandar zero por não saber
+o valor puxa a predição para baixo, já que não ter internet é o fator de proteção mais
+forte da base. Na dúvida, omita o campo em vez de mandar zero.
+
+No PowerShell o heredoc acima não existe. Use o Swagger em `/docs`, ou salve o JSON num
+arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d "@payload.json"`.
 
 ## Comandos (Makefile)
 

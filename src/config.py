@@ -38,6 +38,29 @@ ID_COLUMN: str = "customer_id"
 TEST_SIZE: float = 0.2
 VAL_SIZE: float = 0.2  # fração do conjunto de treino reservada para validação
 
+# --- Modelo campeão / API (Etapa 3) ------------------------------------------
+CHAMPION_MODEL_PATH: Path = MODELS_DIR / "champion_model.joblib"
+"""Artefato local do campeão. O notebook 05 grava esse arquivo sempre, com ou
+sem MLflow no ar, porque ele é entregável explícito do enunciado (ADR-004)."""
+
+CHAMPION_MODEL_NAME: str = "churn_champion"
+"""Nome do modelo registrado no Model Registry do MLflow/DagsHub."""
+
+CHAMPION_MODEL_ALIAS: str = "champion"
+"""Alias que aponta para a versão campeã vigente (ADR-004)."""
+
+CHAMPION_MODEL_URI: str = f"models:/{CHAMPION_MODEL_NAME}@{CHAMPION_MODEL_ALIAS}"
+"""Endereço do campeão no Model Registry, fonte prioritária da API (ADR-006)."""
+
+THRESHOLD_DECISAO: float = 0.5
+"""Threshold padrão para converter probabilidade em classe no `/predict`.
+
+Mantido em 0,5, o mesmo valor com que o campeão foi avaliado (matriz de
+confusão e métricas de negócio do ADR-004: sensibilidade 0,813, precisão
+0,624). O trade-off entre sensibilidade e precisão para outros thresholds
+está documentado no notebook 05 (seções 9 e 10). Ajustar aqui é decisão de
+grupo e deve ser registrada em docs/decisions.md."""
+
 # --- MLflow / DagsHub (config por variável de ambiente) ----------------------
 MLFLOW_TRACKING_URI: str | None = os.getenv("MLFLOW_TRACKING_URI")
 MLFLOW_TRACKING_USERNAME: str | None = os.getenv("MLFLOW_TRACKING_USERNAME")

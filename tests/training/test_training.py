@@ -458,13 +458,18 @@ def test_selecionar_campeao_rejeita_resultado_sem_pipeline(dados_teste):
 
 
 def test_constantes_do_campeao_tem_fonte_unica():
-    """champion escreve, predict le: os enderecos precisam ser o mesmo objeto."""
-    from src.models import predict
-    from src.training import champion
+    """champion escreve, predict le: os enderecos precisam vir do mesmo lugar.
 
-    assert champion.NOME_ARQUIVO_CAMPEAO is predict.NOME_ARQUIVO_CAMPEAO
-    assert champion.NOME_REGISTRO is predict.NOME_REGISTRO
-    assert champion.ALIAS_CAMPEAO is predict.ALIAS_CAMPEAO
+    As constantes moraram em `src.models.predict` antes de `src.config`
+    centralizar (ver ADR-006); este teste garante que `champion.salvar_campeao`
+    e `champion.registrar_campeao` usam os defaults do `config`, e não uma
+    cópia própria que poderia divergir do que `predict.carregar_campeao` lê.
+    """
+    from src import config
+    from src.models import predict
+
+    assert predict.config.CHAMPION_MODEL_PATH is config.CHAMPION_MODEL_PATH
+    assert predict.config.CHAMPION_MODEL_URI == config.CHAMPION_MODEL_URI
 
 
 # --------------------------------------------------------------------------

@@ -29,7 +29,6 @@ from sklearn.pipeline import Pipeline
 
 from src import config
 from src.logger import get_logger
-from src.models.predict import ALIAS_CAMPEAO, NOME_ARQUIVO_CAMPEAO, NOME_REGISTRO
 from src.training.comparison import NOME_RUN_BASELINE
 from src.training.metrics import calcular_metricas
 from src.training.tuning import FONTE_PADRAO, ResultadoTuning
@@ -38,11 +37,10 @@ logger = get_logger(__name__)
 
 NOME_ARQUIVO_BASELINE = "baseline_logistic_regression.joblib"
 
-# O nome do arquivo, o do registro e o do alias vêm de `src.models.predict`, e
-# não são redeclarados aqui. Este módulo escreve o artefato e aquele lê: com
-# duas cópias das constantes, renomear o registro de um lado deixaria o outro
-# procurando um endereço que não existe mais. O import é barato porque
-# `predict` não carrega `mlflow` no topo.
+# O nome do arquivo, o do registro e o do alias vêm de `src.config`, e não
+# são redeclarados aqui. Este módulo escreve o artefato e `src.models.predict`
+# lê: com duas cópias das constantes, renomear o registro de um lado deixaria
+# o outro procurando um endereço que não existe mais.
 
 __all__ = [
     "Campeao",
@@ -193,7 +191,7 @@ def resolver_pipeline_campeao(
 
 def salvar_campeao(pipeline: Pipeline, caminho: Path | str | None = None) -> Path:
     """Grava o pipeline campeão em disco. Roda com ou sem MLflow no ar."""
-    caminho = Path(caminho) if caminho is not None else config.MODELS_DIR / NOME_ARQUIVO_CAMPEAO
+    caminho = Path(caminho) if caminho is not None else config.CHAMPION_MODEL_PATH
     caminho.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(pipeline, caminho)
     logger.info("Modelo campeão salvo em: %s", caminho)
@@ -272,23 +270,25 @@ def registrar_campeao(
                 pipeline,
                 name="modelo",
                 serialization_format="cloudpickle",
-                registered_model_name=NOME_REGISTRO,
+                registered_model_name=config.CHAMPION_MODEL_NAME,
             )
             versao = info.registered_model_version
             if versao is not None:
-                MlflowClient().set_registered_model_alias(NOME_REGISTRO, ALIAS_CAMPEAO, versao)
+                MlflowClient().set_registered_model_alias(
+                    config.CHAMPION_MODEL_NAME, config.CHAMPION_MODEL_ALIAS, versao
+                )
 
         logger.info(
             "Campeão registrado (Model Registry: %s, alias @%s -> versão %s).",
-            NOME_REGISTRO,
-            ALIAS_CAMPEAO,
+            config.CHAMPION_MODEL_NAME,
+            config.CHAMPION_MODEL_ALIAS,
             versao,
         )
         return versao
     except Exception as erro:  # pragma: no cover - depende de rede/credencial
         logger.warning("Não foi possível registrar no Model Registry: %s", erro)
         logger.warning(
-            "O artefato local em 'models/%s' continua sendo a fonte de verdade.",
-            NOME_ARQUIVO_CAMPEAO,
+            "O artefato local em '%s' continua sendo a fonte de verdade.",
+            config.CHAMPION_MODEL_PATH,
         )
         return None

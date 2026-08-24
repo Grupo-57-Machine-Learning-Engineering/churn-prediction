@@ -1,120 +1,111 @@
-"""Carregamento e uso do modelo campeão para inferência.
+"""Carregamento e uso do modelo campeão (Etapa 3).
 
-Espelha o que a célula 31 do `notebooks/05_modelagem.ipynb` produz. Lá o
-campeão sai por duas portas: `joblib.dump` em `models/champion_model.joblib`
-e `mlflow.sklearn.log_model` com `registered_model_name="churn_champion"`,
-seguido de `set_registered_model_alias(..., "champion", versao)`. Este módulo
-lê pelas mesmas duas portas, nessa ordem.
+O modelo pode vir de duas fontes. A prioridade é o Model Registry do
+MLflow/DagsHub, quando o tracking está configurado no `.env` (ver ADR-004 e
+o `.env.example`): é a fonte de verdade de qual versão está marcada como
+`@champion`, e é o que garante que reiniciar a API depois de promover um
+campeão novo já serve o modelo certo, sem precisar sincronizar nenhum
+arquivo manualmente. O artefato local `models/champion_model.joblib`, que o
+notebook 05 grava sempre, é o fallback: cobre o caso de rodar sem rede ou
+sem credencial (ex: dev local sem `.env`), mas pode ficar desatualizado em
+relação ao registry, então só é usado quando o MLflow não está disponível.
 
-O artefato é o Pipeline inteiro (`EngenhariaEstrutural`,
-`DescartadorDeColunas`, `ColumnTransformer` e o estimador), já fitado. Então
-a entrada de `prever` são as colunas pós-ETL, sem nenhum pré-processamento
-manual antes: imputação, escala e one-hot acontecem dentro do pipeline. É a
-mesma chamada que o notebook faz no teste, `pipeline.predict_proba(X)[:, 1]`.
-
-O `DescartadorDeColunas` ignora coluna ausente de propósito, então o mesmo
-pipeline aceita o parquet completo do treino e um payload reduzido, sem as
-colunas `status_*` que não existem no momento da predição.
+O artefato é um Pipeline completo do sklearn (EngenhariaEstrutural,
+DescartadorDeColunas, ColumnTransformer e o estimador no fim), já fitado no
+treino. Por isso a entrada da predição são as colunas pós-ETL do Contrato 3
+em `docs/decisions.md`: não tem pré-processamento manual antes de chamar
+`prever`, o próprio pipeline imputa, escala e codifica.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import joblib
 import pandas as pd
-from sklearn.pipeline import Pipeline
 
 from src import config
 from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-NOME_ARQUIVO_CAMPEAO = "champion_model.joblib"
-"""Artefato local gravado pelo notebook 05. Não é versionado no git."""
+__all__ = ["Campeao", "ModeloIndisponivelError", "carregar_campeao", "prever"]
 
-NOME_REGISTRO = "churn_champion"
-ALIAS_CAMPEAO = "champion"
+ORIGEM_LOCAL = "joblib-local"
+"""Origem reportada quando o modelo veio do artefato em disco.
 
-URI_CAMPEAO = f"models:/{NOME_REGISTRO}@{ALIAS_CAMPEAO}"
-"""Endereço do campeão no Model Registry, o mesmo que o notebook 05 alimenta."""
-
-THRESHOLD_PADRAO = 0.5
-"""Corte de probabilidade para converter em classe.
-
-0,5 é o threshold implícito do notebook, que avalia o campeão com
-`pipeline.predict(X_test)`. Num classificador binário do sklearn, `predict`
-é o argmax das duas probabilidades, ou seja, exatamente `proba >= 0.5`. As
-métricas de negócio do ADR-004 foram medidas nesse corte, então mudar aqui
-invalida a comparação com elas.
+Sem número de versão de propósito: o `.joblib` não carrega essa informação,
+e inventar uma (data do arquivo, hash) daria falsa sensação de rastreio.
 """
 
-__all__ = [
-    "ALIAS_CAMPEAO",
-    "NOME_ARQUIVO_CAMPEAO",
-    "NOME_REGISTRO",
-    "THRESHOLD_PADRAO",
-    "URI_CAMPEAO",
-    "ModeloIndisponivelError",
-    "caminho_padrao_do_campeao",
-    "carregar_campeao",
-    "prever",
-    "prever_um",
-]
+
+class Campeao(NamedTuple):
+    """Modelo carregado junto com a origem de onde ele veio.
+
+    A origem vai para o `model_source` da resposta (Contrato 3). Ela existe
+    porque, com o registry na frente do joblib, o modelo que responde pode
+    mudar sem o pacote mudar de versão: sem esse campo a resposta não diria
+    qual dos dois respondeu (ADR-006).
+    """
+
+    modelo: Any
+    origem: str
 
 
 class ModeloIndisponivelError(RuntimeError):
-    """Nenhuma das duas fontes conseguiu fornecer o campeão."""
+    """Nenhuma fonte conseguiu fornecer o modelo campeão."""
 
 
-def caminho_padrao_do_campeao() -> Path:
-    """Caminho do joblib local, resolvido a partir de `config.MODELS_DIR`."""
-    return config.MODELS_DIR / NOME_ARQUIVO_CAMPEAO
-
-
-def carregar_campeao(caminho: Path | str | None = None) -> Pipeline:
-    """Carrega o pipeline campeão: joblib local primeiro, Registry depois.
-
-    A ordem não é arbitrária. O joblib é o entregável explícito do enunciado,
-    funciona sem rede e sem credencial, e o notebook 05 o grava sempre, mesmo
-    quando o MLflow está fora. O Registry é conveniência para quem não rodou
-    o notebook.
+def carregar_campeao(caminho: Path | str | None = None) -> Campeao:
+    """Carrega o pipeline campeão: MLflow primeiro, joblib local como fallback.
 
     Parameters
     ----------
     caminho
-        Artefato alternativo. `None` usa `caminho_padrao_do_campeao()`.
+        Caminho alternativo para o artefato `.joblib`, usado só se o MLflow
+        não estiver disponível. `None` usa o padrão do projeto
+        (`config.CHAMPION_MODEL_PATH`).
+
+    Returns
+    -------
+    Campeao
+        O modelo e a origem de onde ele veio.
 
     Raises
     ------
     ModeloIndisponivelError
-        Quando o arquivo não existe e o fallback via MLflow não está
-        configurado ou falhou.
+        Se o MLflow não está configurado (ou falhou) e o arquivo local
+        também não existe.
     """
-    caminho = Path(caminho) if caminho is not None else caminho_padrao_do_campeao()
+    campeao = _carregar_do_mlflow()
+    if campeao is not None:
+        return campeao
+
+    caminho = Path(caminho) if caminho is not None else config.CHAMPION_MODEL_PATH
 
     if caminho.exists():
-        logger.info("Carregando o campeão do artefato local: %s", caminho)
-        return joblib.load(caminho)
-
-    modelo = _carregar_do_registry()
-    if modelo is not None:
-        return modelo
+        logger.info("Carregando modelo campeão do artefato local: %s", caminho)
+        return Campeao(joblib.load(caminho), ORIGEM_LOCAL)
 
     raise ModeloIndisponivelError(
-        f"Campeão não encontrado em '{caminho}' e o fallback via MLflow não está "
-        "disponível. Gere o artefato rodando notebooks/05_modelagem.ipynb, ou "
-        "configure o tracking no .env (ver .env.example) para baixar do Model "
-        "Registry do DagsHub."
+        "Modelo campeão não encontrado no MLflow (tracking não configurado ou "
+        f"indisponível) nem em '{caminho}'. Gere o artefato executando o notebook "
+        "notebooks/05_modelagem.ipynb, ou configure o tracking no .env "
+        "(ver .env.example) para baixar do Model Registry do DagsHub."
     )
 
 
-def _carregar_do_registry() -> Pipeline | None:
-    """Baixa o campeão do Model Registry. Devolve `None` se não der.
+def _carregar_do_mlflow() -> Campeao | None:
+    """Tenta baixar o campeão do Model Registry. Devolve `None` se não der.
 
-    Best-effort de propósito: quem chama decide o que fazer sem modelo. Uma
-    API, por exemplo, precisa subir e responder o health check mesmo assim.
+    É best-effort de propósito: a API precisa subir e responder o `/health`
+    mesmo sem DagsHub configurado. Quando o modelo falta, quem lida com isso
+    é o `/predict`, respondendo 503 (ver `src/api/main.py`).
+
+    O tempo limite das chamadas HTTP vem do `MLFLOW_HTTP_REQUEST_TIMEOUT`
+    (ver `.env.example`). Sem ele, um DagsHub lento não levanta exceção nem
+    cai no fallback, ele só não termina, e segura o startup da API.
     """
     tem_token = all(
         (
@@ -125,62 +116,62 @@ def _carregar_do_registry() -> Pipeline | None:
     )
     tem_dagshub = all((config.DAGSHUB_REPO_OWNER, config.DAGSHUB_REPO_NAME))
     if not (tem_token or tem_dagshub):
-        logger.warning("Tracking do MLflow não configurado: fallback indisponível.")
         return None
 
     try:
         import mlflow.sklearn
 
         config.configurar_mlflow_tracking()
-        logger.info("Baixando o campeão do Model Registry: %s", URI_CAMPEAO)
-        return mlflow.sklearn.load_model(URI_CAMPEAO)
+        logger.info("Baixando modelo campeão do registry: %s", config.CHAMPION_MODEL_URI)
+        modelo = mlflow.sklearn.load_model(config.CHAMPION_MODEL_URI)
+        return Campeao(modelo, f"mlflow:{config.CHAMPION_MODEL_NAME}/{_versao_no_registry()}")
     except Exception as erro:  # pragma: no cover - depende de rede/credencial
-        logger.warning("Fallback via MLflow falhou: %s", erro)
+        logger.warning("Carregamento via MLflow falhou, tentando o joblib local: %s", erro)
         return None
 
 
+def _versao_no_registry() -> str:
+    """Número da versão que está com o alias `@champion` agora.
+
+    Best-effort e chamada só depois do modelo já ter carregado: se resolver o
+    alias falhar, o modelo continua servindo e a origem sai com a versão
+    marcada como desconhecida, em vez de derrubar o carregamento por causa de
+    um rótulo.
+    """
+    try:
+        from mlflow import MlflowClient
+
+        versao = MlflowClient().get_model_version_by_alias(
+            config.CHAMPION_MODEL_NAME, config.CHAMPION_MODEL_ALIAS
+        )
+        return str(versao.version)
+    except Exception as erro:  # pragma: no cover - depende de rede/credencial
+        logger.warning("Não consegui resolver a versão do alias @champion: %s", erro)
+        return "desconhecida"
+
+
 def prever(
-    modelo: Pipeline,
+    modelo,
     dados: pd.DataFrame,
-    threshold: float | None = None,
-) -> list[dict[str, Any]]:
-    """Propensão a churn de cada linha de `dados`.
+    threshold: float = config.THRESHOLD_DECISAO,
+) -> list[dict]:
+    """Calcula a propensão de churn para cada linha de `dados`.
 
     Parameters
     ----------
     modelo
-        Pipeline campeão, saída de `carregar_campeao`.
+        Pipeline campeão (saída de `carregar_campeao`).
     dados
-        DataFrame com as colunas pós-ETL, uma linha por cliente. O pipeline
-        cuida da preparação.
+        DataFrame com as colunas pós-ETL do Contrato 3, uma linha por
+        cliente. O pipeline interno cuida de imputação, escala e one-hot.
     threshold
-        Corte para converter probabilidade em classe. `None` usa
-        `THRESHOLD_PADRAO`.
+        Corte para converter probabilidade em classe (padrão
+        `config.THRESHOLD_DECISAO`).
 
     Returns
     -------
     list[dict]
-        Um dict por linha, com `probability` (float) e `churn` (bool), na
-        mesma ordem das linhas de entrada.
-
-    Raises
-    ------
-    ValueError
-        Se `dados` vier vazio. Um DataFrame sem linhas quase sempre é erro de
-        montagem do payload, e devolver lista vazia em silêncio esconde isso.
+        Um dict por linha: `{"probability": float, "churn": bool}`.
     """
-    if dados.empty:
-        raise ValueError("DataFrame de entrada está vazio: nada a prever.")
-
-    threshold = THRESHOLD_PADRAO if threshold is None else threshold
     probabilidades = modelo.predict_proba(dados)[:, 1]
     return [{"probability": float(p), "churn": bool(p >= threshold)} for p in probabilidades]
-
-
-def prever_um(
-    modelo: Pipeline,
-    cliente: dict[str, Any],
-    threshold: float | None = None,
-) -> dict[str, Any]:
-    """Atalho de uma linha, para quem recebe um cliente como dict."""
-    return prever(modelo, pd.DataFrame([cliente]), threshold)[0]
