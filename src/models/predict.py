@@ -1,11 +1,14 @@
 """Carregamento e uso do modelo campeão (Etapa 3).
 
-O modelo pode vir de duas fontes. A primeira é o artefato local
-`models/champion_model.joblib`, que o notebook 05 grava sempre, com ou sem
-MLflow no ar. É o caminho padrão porque funciona sem rede e sem credencial.
-A segunda é o Model Registry do MLflow/DagsHub, usado como fallback quando
-o arquivo local não existe e o tracking está configurado no `.env` (ver
-ADR-004 e o `.env.example`).
+O modelo pode vir de duas fontes. A prioridade é o Model Registry do
+MLflow/DagsHub, quando o tracking está configurado no `.env` (ver ADR-004 e
+o `.env.example`): é a fonte de verdade de qual versão está marcada como
+`@champion`, e é o que garante que reiniciar a API depois de promover um
+campeão novo já serve o modelo certo, sem precisar sincronizar nenhum
+arquivo manualmente. O artefato local `models/champion_model.joblib`, que o
+notebook 05 grava sempre, é o fallback: cobre o caso de rodar sem rede ou
+sem credencial (ex: dev local sem `.env`), mas pode ficar desatualizado em
+relação ao registry, então só é usado quando o MLflow não está disponível.
 
 O artefato é um Pipeline completo do sklearn (EngenhariaEstrutural,
 DescartadorDeColunas, ColumnTransformer e o estimador no fim), já fitado no
@@ -34,33 +37,34 @@ class ModeloIndisponivelError(RuntimeError):
 
 
 def carregar_campeao(caminho: Path | str | None = None):
-    """Carrega o pipeline campeão: joblib local primeiro, MLflow como fallback.
+    """Carrega o pipeline campeão: MLflow primeiro, joblib local como fallback.
 
     Parameters
     ----------
     caminho
-        Caminho alternativo para o artefato `.joblib`. `None` usa o padrão
-        do projeto (`config.CHAMPION_MODEL_PATH`).
+        Caminho alternativo para o artefato `.joblib`, usado só se o MLflow
+        não estiver disponível. `None` usa o padrão do projeto
+        (`config.CHAMPION_MODEL_PATH`).
 
     Raises
     ------
     ModeloIndisponivelError
-        Se o arquivo local não existe e o fallback via MLflow não está
-        configurado ou falhou.
+        Se o MLflow não está configurado (ou falhou) e o arquivo local
+        também não existe.
     """
+    modelo = _carregar_do_mlflow()
+    if modelo is not None:
+        return modelo
+
     caminho = Path(caminho) if caminho is not None else config.CHAMPION_MODEL_PATH
 
     if caminho.exists():
         logger.info("Carregando modelo campeão do artefato local: %s", caminho)
         return joblib.load(caminho)
 
-    modelo = _carregar_do_mlflow()
-    if modelo is not None:
-        return modelo
-
     raise ModeloIndisponivelError(
-        f"Modelo campeão não encontrado em '{caminho}' e o fallback via MLflow "
-        "não está disponível. Gere o artefato executando o notebook "
+        "Modelo campeão não encontrado no MLflow (tracking não configurado ou "
+        f"indisponível) nem em '{caminho}'. Gere o artefato executando o notebook "
         "notebooks/05_modelagem.ipynb, ou configure o tracking no .env "
         "(ver .env.example) para baixar do Model Registry do DagsHub."
     )

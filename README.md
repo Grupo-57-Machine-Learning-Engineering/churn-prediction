@@ -61,11 +61,12 @@ A API de inferência (Etapa 3) serve o modelo campeão via FastAPI.
 Pré-requisito: o modelo campeão. O artefato `models/champion_model.joblib` não é
 versionado, e há duas formas de obtê-lo:
 
-1. Rodar o notebook de modelagem (`notebooks/05_modelagem.ipynb`), que grava o joblib
-   sempre, com ou sem MLflow no ar; ou
-2. Deixar o fallback trabalhar: com o `.env` configurado (ver seção de tracking acima),
-   a API baixa `models:/churn_champion@champion` do Model Registry do DagsHub sozinha
-   quando não encontra o joblib local.
+1. Configurar o `.env` (ver seção de tracking acima): a API baixa
+   `models:/churn_champion@champion` do Model Registry do DagsHub sozinha no startup,
+   sempre a versão mais atual marcada como campeã; ou
+2. Rodar o notebook de modelagem (`notebooks/05_modelagem.ipynb`), que grava o joblib
+   local sempre, com ou sem MLflow no ar — usado como fallback quando o `.env` não está
+   configurado ou o MLflow está indisponível.
 
 Sem nenhuma das duas, a API sobe mesmo assim: `GET /health` responde `ok` e
 `POST /predict` devolve 503 explicando o que falta.

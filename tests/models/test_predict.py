@@ -42,6 +42,27 @@ def test_carregar_campeao_sem_fonte_disponivel(tmp_path, monkeypatch):
         carregar_campeao(tmp_path / "nao_existe.joblib")
 
 
+def test_carregar_campeao_prioriza_mlflow_sobre_joblib_local(
+    tmp_path, campeao_sintetico, monkeypatch
+):
+    """Com as duas fontes disponíveis, o MLflow ganha: é a fonte de verdade do
+    campeão atual, e o joblib local pode estar desatualizado. Isso é o que
+    garante que reiniciar a API depois de promover um campeão novo já serve
+    o modelo certo, sem precisar sincronizar nenhum arquivo manualmente.
+    """
+    caminho = tmp_path / "champion_model.joblib"
+    joblib.dump("modelo_local_desatualizado", caminho)
+
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_URI", "https://dagshub.com/fake")
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_USERNAME", "fake")
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_PASSWORD", "fake")
+    monkeypatch.setattr("src.models.predict._carregar_do_mlflow", lambda: campeao_sintetico)
+
+    modelo = carregar_campeao(caminho)
+
+    assert modelo is campeao_sintetico
+
+
 def test_prever_respeita_threshold(campeao_sintetico, payload_valido):
     dados = pd.DataFrame([payload_valido])
 

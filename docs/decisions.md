@@ -347,15 +347,15 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
 - **Contexto:** com o campeão definido e registrado (ADR-004), a Etapa 3 popula
   `src/models/` e `src/api/` com o serviço de inferência exigido pelo enunciado
   (`GET /health` + `POST /predict`, mínimo 2 testes automatizados).
-- **Decisão (fonte do modelo, local primeiro):** `carregar_campeao()` em
-  `src/models/predict.py` carrega `models/champion_model.joblib` como padrão e só tenta
-  `models:/churn_champion@champion` no MLflow/DagsHub como fallback, quando o arquivo
-  local não existe e o `.env` está configurado. O motivo: o joblib é o entregável
-  explícito do enunciado e funciona sem rede e sem credencial, enquanto o Registry é
-  conveniência, seguindo a mesma lógica do fallback gracioso do ADR-004. Sem nenhuma das
-  duas fontes a API sobe mesmo assim: `/health` responde `ok` e `/predict` devolve 503
-  com instrução de como obter o artefato, de modo que a API nunca caia por falta de
-  modelo.
+- **Decisão (fonte do modelo, MLflow primeiro):** `carregar_campeao()` em
+  `src/models/predict.py` tenta `models:/churn_champion@champion` no MLflow/DagsHub
+  primeiro, quando o `.env` está configurado, e usa `models/champion_model.joblib` como
+  fallback (funciona sem rede e sem credencial). O Registry é a fonte de verdade de qual
+  versão está marcada como campeã; priorizá-lo garante que reiniciar a API depois de
+  promover um campeão novo já sirva o modelo certo, sem depender de sincronizar o
+  `.joblib` manualmente em todo ambiente de deploy. Sem nenhuma das duas fontes a API
+  sobe mesmo assim: `/health` responde `ok` e `/predict` devolve 503 com instrução de
+  como obter o artefato.
 - **Decisão (threshold de decisão):** mantido em 0,5 (`src/config.py:THRESHOLD_DECISAO`),
   o mesmo com que o campeão foi avaliado (métricas de negócio do ADR-004: sensibilidade
   0,813, precisão 0,624). O ajuste do trade-off entre sensibilidade e precisão segue como
@@ -367,46 +367,33 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
   `RandomForest`), então imputação, escala e one-hot acontecem dentro dele, e o
   `DescartadorDeColunas` já foi desenhado para tolerar o payload reduzido de 28 colunas.
   Rodar o ETL de junção dentro da API não faz sentido para predição de cliente único.
-- **Decisão (validação, pós-review):** categórica é `str` livre, numérica é validada por
-  faixa. O rascunho do PR usava `Literal` com domínio fechado nas categóricas, e o review
-  levantou dois problemas. Primeiro, consistência: `services_payment_method` tinha ficado
-  livre enquanto o resto era fechado, então valor desconhecido dava 422 em algumas colunas
-  e passava em outras. Segundo, e mais importante, o efeito operacional de barrar: o score
-  de um modelo costuma ser gatilho de vários sistemas a jusante, e recusar o request
-  porque a operadora lançou um plano novo transforma uma questão de dado numa
-  indisponibilidade em cascata. Também não se justifica deixar de pontuar um cliente só
-  porque uma informação dele veio diferente do esperado.
-  A regra que ficou: texto desconhecido é aceito e absorvido pelo
-  `OneHotEncoder(handle_unknown="infrequent_if_exist")`, que já era o comportamento do
-  treino; dado que não descreve cliente nenhum (tipo errado, campo faltando, idade ou
-  cobrança negativa) continua devolvendo 422. Os valores conhecidos da base seguem
-  documentados na descrição de cada campo, então o Swagger continua guiando quem consome.
-  O custo assumido é que a predição com categoria nova ignora o significado daquele valor,
-  sem sinalizar isso na resposta. Sinalizar é justamente o trabalho de detecção de data
-  drift, que o grupo decidiu tratar na etapa de monitoramento (ver `monitoring_plan.md`,
-  ainda a criar) em vez de improvisar um aviso no payload agora.
-- **Decisão (campos opcionais, pós-review):** nenhum campo do `POST /predict` é
-  obrigatório. Quem consome nem sempre tem a ficha completa do cliente, e o pipeline foi
-  construído para isso desde a Etapa 1, com `SimpleImputer(strategy="median",
-  add_indicator=True)` nos numéricos e imputação por constante nos categóricos. Pesou
-  também uma incoerência medida antes da mudança: como as categóricas são `str` livre, a
-  API já aceitava string vazia, e string vazia e campo omitido produzem exatamente a mesma
-  probabilidade (0,0517 nos dois casos no pipeline sintético dos testes). Recusar um e
-  aceitar o outro era diferença de forma, não de informação.
-  Junto com essa decisão veio um conserto em `EngenhariaEstrutural`
-  (`src/features/preparation.py`): as flags de zero estrutural tratavam nulo como zero, e
-  zero ali significa "não tem o serviço". Sem o conserto, omitir
-  `services_avg_monthly_gb_download` marcava `flag_sem_internet=1`, ou seja, o cliente
-  entrava no modelo como se não tivesse internet, que é o fator de proteção mais forte da
-  base (7,4% de churn contra 31,8%), enviesando a predição para baixo em silêncio. Agora o
-  nulo permanece nulo e quem decide é o imputer. **A mudança não altera nada do que o
-  modelo aprendeu**: nessas colunas a base de treino nunca tem nulo (o zero é real), então
-  só muda o comportamento na inferência com dado parcial.
+- **Decisão (validação):** categórica é `str` livre, numérica é validada por faixa. O
+  score de um modelo costuma ser gatilho de sistemas a jusante, e recusar o request
+  porque um valor de categoria é novo (ex: operadora lançou plano novo) transforma uma
+  questão de dado numa indisponibilidade em cascata, sem necessidade: o
+  `OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline já absorve categoria
+  desconhecida, é o mesmo comportamento do treino. Dado que não descreve cliente nenhum
+  (tipo errado, campo faltando, idade ou cobrança negativa) continua devolvendo 422. Os
+  valores conhecidos da base seguem documentados na descrição de cada campo, para o
+  Swagger continuar guiando quem consome. Custo assumido: a predição com categoria nova
+  ignora o significado daquele valor, sem sinalizar isso na resposta — sinalizar é
+  trabalho de detecção de data drift, que fica para a etapa de monitoramento
+  (`monitoring_plan.md`, ainda a criar).
+- **Decisão (campos opcionais):** nenhum campo do `POST /predict` é obrigatório. Quem
+  consome nem sempre tem a ficha completa do cliente, e o pipeline foi construído para
+  isso desde a Etapa 1, com `SimpleImputer(strategy="median", add_indicator=True)` nos
+  numéricos e imputação por constante nos categóricos.
+  Consequência em `EngenhariaEstrutural` (`src/features/preparation.py`): as flags de
+  zero estrutural tratavam nulo como zero, e zero ali significa "não tem o serviço".
+  Omitir `services_avg_monthly_gb_download` marcava `flag_sem_internet=1` — o cliente
+  entrava no modelo como se não tivesse internet, o fator de proteção mais forte da base
+  (7,4% de churn contra 31,8%), enviesando a predição para baixo em silêncio. Corrigido
+  para nulo permanecer nulo, com o imputer decidindo. Não altera nada do que o modelo
+  aprendeu: nessas colunas a base de treino nunca tem nulo (o zero é real), então só muda
+  o comportamento na inferência com dado parcial.
   Custo assumido: quanto menos campo chega, mais a predição se apoia no perfil mediano do
-  treino, e a resposta não diz o quanto. Vale registrar que payload vazio não devolve a
-  taxa base (0,079 medido contra prevalência de 0,329 no pipeline sintético), então o
-  número parece confiável mesmo sem informação nenhuma. Quantificar isso é o mesmo
-  trabalho de data drift adiado para o monitoramento.
+  treino, sem sinalizar isso na resposta — mesmo trabalho de data drift adiado para o
+  monitoramento.
 - **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
   versionado, logo o CI não o tem. Os testes de API e de predição
   (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":
@@ -416,6 +403,4 @@ predição para baixo, porque não ter internet é o fator de proteção mais fo
 - **Consequências:** `model_version` da resposta reporta a versão do pacote
   (`src.__version__`, gerida pelo commitizen), não a versão do Model Registry, por
   simplicidade. Se o grupo quiser expor a versão do Registry, é mudança de contrato.
-  O exemplo do Contrato 3 foi corrigido (`services_payment_method` saiu de
-  "Electronic Check", domínio do Kaggle, para "Credit Card", domínio da base real).
   Como rodar a API está no README, na seção "Rodando a API localmente".
