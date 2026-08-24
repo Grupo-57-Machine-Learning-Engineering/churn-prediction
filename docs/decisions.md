@@ -118,7 +118,8 @@ As observações de vazamento/derivação do alvo vêm da análise empírica do 
 
 ### Contrato 3 — API (Pydantic)
 
-Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
+Endpoints em `src/api`. Os dois primeiros são exigidos explicitamente pelo enunciado
+atual; o terceiro é conveniência de demonstração pedida no review da Etapa 3.
 
 - `GET /health` — liveness simples, sem dependências externas.
 
@@ -127,7 +128,17 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
   { "status": "ok" }
   ```
 - `POST /predict` — request espelha as 28 features de entrada do Contrato 2 (colunas do
-  Contrato 1 que sobrevivem ao descarte padrão).
+  Contrato 1 que sobrevivem ao descarte padrão). **Todos os campos são opcionais**, ver
+  ADR-006.
+- `GET /sample` — amostra de clientes de exemplo já pontuados, cada um com o `payload`
+  completo e o `resultado` do modelo. Serve para ver a API funcionando sem montar payload
+  na mão e para a demonstração da entrega. O `payload` de qualquer item pode ser colado no
+  `POST /predict` e devolve exatamente os mesmos números, garantido por teste
+  (`test_sample_bate_com_predict`), porque os dois caminhos usam a mesma conversão
+  (`ChurnRequest.to_dataframe`) e a mesma função `prever`. Os perfis são fixos, escritos à
+  mão dentro do domínio do Contrato 1, e não linhas do parquet: o parquet não é versionado
+  e cliente real não é coisa para devolver em endpoint de demonstração. A amostra cobre os
+  dois extremos de risco, cliente sem internet, ficha incompleta e categoria desconhecida.
 
 ```jsonc
 // Request  (ChurnRequest)
@@ -155,7 +166,7 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
   "services_unlimited_data": "Yes",
   "services_contract": "Month-to-Month",
   "services_paperless_billing": "Yes",
-  "services_payment_method": "Electronic Check",
+  "services_payment_method": "Credit Card",
   "services_monthly_charge": 79.85,
   "services_total_charges": 958.2,
   "services_total_refunds": 0.0,
@@ -168,6 +179,25 @@ Endpoints em `src/api`, ambos exigidos explicitamente pelo enunciado atual:
 de propósito: o resto do domínio categórico dessa coluna (`"Cable"`/`"DSL"`/`"Fiber Optic"`)
 já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
 
+`services_payment_method`: o exemplo anterior usava `"Electronic Check"`, que é domínio do
+CSV do Kaggle de 21 colunas (fonte descartada pelo ADR-003). Na base real da IBM os
+valores são `"Bank Withdrawal"`/`"Credit Card"`/`"Mailed Check"`.
+
+**Colunas categóricas aceitam qualquer string.** Os valores acima são os que existem na
+base e ficam documentados na descrição de cada campo (visíveis no Swagger), mas não são
+uma lista fechada: categoria nova passa pela validação e é absorvida pelo
+`OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline. Decisão do review da
+Etapa 3, detalhada no ADR-006.
+
+**Todo campo é opcional.** O exemplo acima é um payload completo, mas nenhum campo é
+obrigatório: o que faltar é imputado pelo pipeline. Duas colunas têm ressalva de
+significado, `services_avg_monthly_gb_download` e
+`services_avg_monthly_long_distance_charges`, onde **zero e ausente querem dizer coisas
+diferentes**. Zero significa que o cliente não tem o serviço (é o que alimenta
+`flag_sem_internet` e `flag_sem_telefone`, ver `ZEROS_ESTRUTURAIS`), enquanto ausente
+significa apenas que o dado não veio. Mandar zero por não saber o valor empurra a
+predição para baixo, porque não ter internet é o fator de proteção mais forte da base.
+
 ```jsonc
 // Response (ChurnResponse)
 {
@@ -175,12 +205,27 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
   "probability": 0.78, // float em [0, 1]: propensão a um comportamento de churn observável AGORA
   // (mesma definição do alvo, status_churn_value — snapshot, sem horizonte
   // temporal; não é "probabilidade de cancelar nos próximos N meses", ver ADR-005)
-  "model_version": "0.1.0", // versão do modelo usada
+  "model_version": "0.1.0", // versão do PACOTE que respondeu (src.__version__, commitizen).
+  // Identifica o código, incluindo o pré-processamento do pipeline.
+  "model_source": "mlflow:churn_champion/3", // de onde o campeão foi carregado no startup:
+  // "mlflow:churn_champion/<versao>" (Model Registry) ou "joblib-local" (artefato em disco).
+  // Existe porque o modelo servido pode mudar sem o pacote mudar de versão (ADR-006).
 }
 ```
 
-- Validação de tipos e domínios via Pydantic; categorias inválidas → HTTP 422.
-- Enquanto o modelo final não existe, a trilha de API mocka a resposta seguindo este formato.
+O `GET /sample` devolve `model_version` e `model_source` no topo, com os mesmos valores que
+aparecem no `resultado` de cada cliente. Os dois são lidos uma vez, no startup: a API não
+troca de modelo enquanto está no ar.
+
+- Validação de tipos e faixas via Pydantic: tipo errado, idade ou valor monetário negativo
+  devolvem HTTP 422. Categoria de texto desconhecida e campo ausente **não** devolvem 422,
+  pontuam normalmente (ADR-006).
+- Campos extras também dão 422 (`extra="forbid"`), decisão mantida no ADR-006: em
+  particular `services_offer`, em
+  quarentena por suspeita de vazamento (notebook 03 §5.2), é rejeitada explicitamente em
+  vez de silenciosamente ignorada.
+- Implementado na Etapa 3 (`src/api/schemas.py` + `src/api/main.py`, ver ADR-006). O mock
+  previsto originalmente para esta trilha deixou de ser necessário.
 
 ---
 
@@ -305,3 +350,94 @@ já vem em inglês da IBM (ver `fix/categoria-nulos-internet-oferta-em-ingles`).
   como testado empiricamente no notebook 03. O Contrato 3 documenta explicitamente que
   `probability` não tem unidade de tempo. O Model Card deve registrar essa limitação
   (previsão é sobre estado observado, não sobre risco em um horizonte futuro).
+
+### ADR-006 — Etapa 3: módulo de predição e API de inferência
+
+- **Contexto:** com o campeão definido e registrado (ADR-004), a Etapa 3 popula
+  `src/models/` e `src/api/` com o serviço de inferência exigido pelo enunciado
+  (`GET /health` + `POST /predict`, mínimo 2 testes automatizados).
+- **Decisão (fonte do modelo, MLflow primeiro):** `carregar_campeao()` em
+  `src/models/predict.py` tenta `models:/churn_champion@champion` no MLflow/DagsHub
+  primeiro, quando o `.env` está configurado, e usa `models/champion_model.joblib` como
+  fallback (funciona sem rede e sem credencial). O Registry é a fonte de verdade de qual
+  versão está marcada como campeã; priorizá-lo garante que reiniciar a API depois de
+  promover um campeão novo já sirva o modelo certo, sem depender de sincronizar o
+  `.joblib` manualmente em todo ambiente de deploy. Sem nenhuma das duas fontes a API
+  sobe mesmo assim: `/health` responde `ok` e `/predict` devolve 503 com instrução de
+  como obter o artefato.
+  Custo assumido: o startup passou a depender de rede. O `MLFLOW_HTTP_REQUEST_TIMEOUT`
+  (ver `.env.example`) limita a espera, porque um DagsHub lento não levanta exceção nem
+  cai no fallback, ele só não termina e segura a subida da API. O startup medido em
+  desenvolvimento fica por volta de 7 segundos, número que também importa para o período
+  de carência de healthcheck em qualquer deploy conteinerizado. Recarregar o campeão sem
+  reiniciar o processo (endpoint administrativo ou checagem periódica do registry) ficou
+  de fora: com o modelo sendo treinado à mão, reiniciar é procedimento aceitável.
+- **Decisão (threshold de decisão):** mantido em 0,5 (`src/config.py:THRESHOLD_DECISAO`),
+  o mesmo com que o campeão foi avaliado (métricas de negócio do ADR-004: sensibilidade
+  0,813, precisão 0,624). O ajuste do trade-off entre sensibilidade e precisão segue como
+  melhoria futura (notebook 05, seção 10). Se acontecer, muda numa constante única e
+  ganha entrada aqui.
+- **Decisão (formato de entrada):** a API recebe o cliente já no formato pós-ETL
+  (Contrato 3), não no formato cru das 5 planilhas. O artefato salvo é o Pipeline
+  completo (`EngenhariaEstrutural`, `DescartadorDeColunas`, `ColumnTransformer`,
+  `RandomForest`), então imputação, escala e one-hot acontecem dentro dele, e o
+  `DescartadorDeColunas` já foi desenhado para tolerar o payload reduzido de 28 colunas.
+  Rodar o ETL de junção dentro da API não faz sentido para predição de cliente único.
+- **Decisão (validação):** categórica é `str` livre, numérica é validada por faixa. O
+  score de um modelo costuma ser gatilho de sistemas a jusante, e recusar o request
+  porque um valor de categoria é novo (ex: operadora lançou plano novo) transforma uma
+  questão de dado numa indisponibilidade em cascata, sem necessidade: o
+  `OneHotEncoder(handle_unknown="infrequent_if_exist")` do pipeline já absorve categoria
+  desconhecida, é o mesmo comportamento do treino. Dado que não descreve cliente nenhum
+  (tipo errado, campo faltando, idade ou cobrança negativa) continua devolvendo 422. Os
+  valores conhecidos da base seguem documentados na descrição de cada campo, para o
+  Swagger continuar guiando quem consome. Custo assumido: a predição com categoria nova
+  ignora o significado daquele valor, sem sinalizar isso na resposta — sinalizar é
+  trabalho de detecção de data drift, que fica para a etapa de monitoramento
+  (`monitoring_plan.md`).
+- **Decisão (campos opcionais):** nenhum campo do `POST /predict` é obrigatório. Quem
+  consome nem sempre tem a ficha completa do cliente, e o pipeline foi construído para
+  isso desde a Etapa 1, com `SimpleImputer(strategy="median", add_indicator=True)` nos
+  numéricos e imputação por constante nos categóricos.
+  Consequência em `EngenhariaEstrutural` (`src/features/preparation.py`): as flags de
+  zero estrutural tratavam nulo como zero, e zero ali significa "não tem o serviço".
+  Omitir `services_avg_monthly_gb_download` marcava `flag_sem_internet=1` — o cliente
+  entrava no modelo como se não tivesse internet, o fator de proteção mais forte da base
+  (7,4% de churn contra 31,8%), enviesando a predição para baixo em silêncio. Corrigido
+  para nulo permanecer nulo, com o imputer decidindo. Não altera nada do que o modelo
+  aprendeu: nessas colunas a base de treino nunca tem nulo (o zero é real), então só muda
+  o comportamento na inferência com dado parcial.
+  Custo assumido: quanto menos campo chega, mais a predição se apoia no perfil mediano do
+  treino, sem sinalizar isso na resposta — mesmo trabalho de data drift adiado para o
+  monitoramento.
+- **Decisão (testes sem o artefato real):** `models/champion_model.joblib` não é
+  versionado, logo o CI não o tem. Os testes de API e de predição
+  (`tests/api/test_api.py`, `tests/models/test_predict.py`) usam um "campeão sintético":
+  a mesma factory `build_pipeline()` de produção, fitada em segundos sobre uma base
+  sintética com as 28 colunas do Contrato 3 (`tests/conftest.py`), injetada via
+  monkeypatch no lugar do carregamento real.
+- **Decisão (identificação do modelo servido):** a resposta ganhou `model_source`, campo
+  novo, ao lado do `model_version`. O `model_version` continua sendo `src.__version__`
+  (commitizen), que identifica o código: o pré-processamento vive em
+  `src/features/preparation.py` e é o pacote que determina como o dado chega no
+  estimador. O `model_source` diz de qual fonte o campeão veio, com a versão do Registry
+  quando aplicável (`mlflow:churn_champion/3` ou `joblib-local`). Motivo: com o registry
+  na frente do joblib, o modelo que responde passou a poder mudar sem o pacote mudar de
+  versão, então `model_version` sozinho deixou de identificar quem respondeu. Campo novo
+  em vez de redefinir o antigo porque as duas informações são reais e diferentes, e
+  porque adicionar não quebra quem já lê `model_version`. A versão do alias é resolvida
+  em chamada separada ao Registry, best-effort: se ela falhar o modelo continua servindo
+  e a origem sai como `mlflow:churn_champion/desconhecida`, já que rótulo não é motivo
+  para derrubar predição.
+- **Decisão (`extra="forbid"` fica):** campo desconhecido no `POST /predict` continua
+  devolvendo 422, mesmo depois de tudo o mais ter afrouxado. A assimetria é proposital.
+  Soltar as categóricas protege disponibilidade: valor novo numa coluna conhecida ainda
+  descreve o cliente, e o pipeline sabe absorver. Campo desconhecido é outra coisa, é
+  alguém mandando dado que a API não modela, e o caso concreto é o `services_offer`, em
+  quarentena por suspeita de vazamento (notebook 03 §5.2). Aceitar e ignorar em silêncio
+  seria o pior dos dois mundos: quem consome acharia que a informação entrou na predição.
+  Custo assumido: cliente que evoluir o schema antes da API toma 422 numa chamada que
+  teria funcionado ignorando o campo extra. É o custo que o grupo aceita para o
+  `services_offer` nunca entrar por descuido.
+- **Consequências:** o Contrato 3 mudou (campo novo na resposta), avisado no canal.
+  Como rodar a API está no README, na seção "Rodando a API localmente".
