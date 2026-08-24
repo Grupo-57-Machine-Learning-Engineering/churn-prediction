@@ -441,3 +441,79 @@ troca de modelo enquanto está no ar.
   `services_offer` nunca entrar por descuido.
 - **Consequências:** o Contrato 3 mudou (campo novo na resposta), avisado no canal.
   Como rodar a API está no README, na seção "Rodando a API localmente".
+
+### ADR-007 — Extração do treino e da predição do notebook para `src/`
+
+- **Contexto:** o pré-processamento já vivia em `src/features/preparation.py` desde a Etapa 1,
+  e `notebooks/03_preparacao.ipynb` o consome em vez de manter cópia. O treino não: todo o
+  código de métricas, fábricas de estimadores, espaços de busca, os três métodos de tuning,
+  a comparação via MLflow e o registro do campeão estava dentro de
+  `notebooks/05_modelagem.ipynb`, dependendo de variáveis globais (`X_train`, `y_train`,
+  `N_SPLITS`, `SCORING`). Nada disso era importável nem testável. `src/training/` e
+  `src/models/` estavam vazios, e o README já os marcava como "a implementar".
+- **Decisão:** extrair para módulos, um por responsabilidade: `training/dataset.py`,
+  `training/metrics.py`, `training/estimators.py`, `training/tuning.py`,
+  `training/comparison.py`, `training/champion.py`, `training/baseline.py` e
+  `models/predict.py`. Todo estado entra por parâmetro. Optuna e MLflow permanecem exatamente
+  como no notebook, incluindo `TPESampler(seed)`, `MedianPruner(n_warmup_steps=1)`, pruning por
+  fold e a estrutura de uma run pai com três filhas por candidato.
+- **Decisão (paridade como critério de aceite):** a refatoração foi validada rodando o código
+  original do notebook e o dos módulos sobre os mesmos dados e a mesma seed, comparando com
+  tolerância absoluta de 1e-12. Os três métodos de busca, as quatro métricas de cada um e os
+  `best_params` deram idênticos para dois candidatos (Regressão Logística sem peso e MLP com
+  `sample_weight`), assim como a tabela comparativa, a seleção do campeão e as métricas de
+  negócio. A predição foi comparada contra o artefato real baixado do DagsHub.
+- **Decisão (o `__init__.py` não reexporta):** importa-se sempre do módulo
+  (`from src.training.metrics import calcular_metricas`). Uma fachada no `__init__` obrigaria
+  a importar `tuning` e `champion` para reexportá-los, e aí qualquer import do pacote
+  arrastaria `mlflow` e `optuna` junto. Medido: 2,68s contra 1,49s para chegar na mesma função.
+- **Decisão (baseline com fábrica própria):** `baseline.criar_baseline` não reaproveita
+  `estimators.criar_logistic_regression`, porque aquela força `solver="liblinear"` para o grid
+  poder alternar entre penalidade `l1` e `l2`. O baseline do notebook 04 usa o solver padrão
+  (`lbfgs`), e unificar mudaria o número de referência da Etapa 1.
+- **Divergências deliberadas em relação ao notebook:** (1) `calcular_metricas_negocio` devolve
+  `0.0` onde o notebook estouraria com `ZeroDivisionError`, e usa `labels=[0, 1]` para a matriz
+  de confusão não degenerar em 1x1; (2) `montar_tabela_comparativa`, `buscar_baseline`,
+  `registrar_comparacao` e `selecionar_campeao` ganharam guardas que trocam `KeyError` cru por
+  erro explicando a causa; (3) os erros de arquivo ausente dizem o que rodar para gerar o
+  artefato. Nenhuma delas altera número no caminho feliz.
+- **Consequências:** os notebooks 01, 04 e 05 não foram alterados, então continuam com as
+  cópias antigas do mesmo código. Enquanto ninguém trocar as células por imports, existe
+  duplicação entre notebook e módulo, e as duas podem divergir. Migrar exige reexecutar os
+  notebooks, o que cria runs novas no DagsHub e pode trocar a versão do campeão no Registry.
+
+### ADR-008 — `pr_auc_std` do Optuna não é comparável com o das outras buscas
+
+- **Contexto:** achado de code review durante a extração do ADR-007, herdado do notebook 05.
+  Em `_rodar_optuna`, o `pr_auc_std` vem da dispersão **entre os trials** do estudo, enquanto o
+  `GridSearchCV` e o `RandomizedSearchCV` logam `std_test_pr_auc`, que é a dispersão da
+  configuração vencedora **entre os folds**. As três linhas aparecem lado a lado na comparação
+  do MLflow com o mesmo nome de métrica querendo dizer coisas diferentes. Soma-se a isso um
+  filtro que não filtra: `[t.value for t in estudo.trials if t.value is not None]` foi escrito
+  para pular os trials podados, mas o Optuna preenche o `value` de um trial podado com a última
+  pontuação intermediária, então nenhum é removido, e médias de 5 folds ficam misturadas com
+  scores de um fold só. Verificado num estudo de 15 trials com `MedianPruner`: 3 podados, nenhum
+  com `value` nulo.
+- **Magnitude na base real** (Regressão Logística, 5 folds, 5 trials, `SEED=42`):
+
+  | medida | valor |
+  |---|---|
+  | `pr_auc_std` do grid_search, entre folds | 0,0125431083 |
+  | `pr_auc_std` do optuna, entre trials | 0,0622188279 |
+  | o mesmo optuna, se medido entre folds | 0,0124789143 |
+
+  O 0,0622 não é instabilidade do modelo: vem de um único trial ruim (0,601) inflando a
+  dispersão da busca. Medida entre folds, a configuração vencedora do Optuna varia tanto quanto
+  a do grid, que é a leitura que a tabela comparativa sugere ao pôr as duas na mesma coluna.
+- **Decisão:** manter o cálculo do notebook. Corrigir mudaria um número já registrado nas runs
+  da Etapa 2 e quebraria a paridade bit a bit que é o critério de aceite do ADR-007. Em
+  compensação, o desvio entre folds passou a ser logado junto, na run do Optuna, como
+  `pr_auc_std_entre_folds`. Ele sai de graça: `_metricas_cv_complementares` já refita a
+  configuração vencedora nos 5 folds para calcular F1 e AUC-ROC. Assim nenhum número muda e
+  quem precisar comparar os três métodos tem a grandeza certa disponível.
+- **Consequências:** a coluna `pr_auc_std` da tabela comparativa continua não sendo comparável
+  entre linhas, e quem ler a tabela precisa saber disso. O `pr_auc_mean`, que é o critério de
+  escolha do campeão, não é afetado em nenhum cenário. Se o grupo decidir corrigir de vez, o
+  caminho é trocar `pr_auc_std` por `pr_auc_std_entre_folds` no `ResultadoTuning` e filtrar os
+  trials por `TrialState.COMPLETE`, o que exige reexecutar o notebook 05 e anotar a quebra de
+  comparabilidade com as runs antigas do DagsHub.

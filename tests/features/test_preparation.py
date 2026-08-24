@@ -347,3 +347,26 @@ def test_pipeline_lida_com_categoria_nova(base):
     novo.loc[:, "services_payment_method"] = "Pix"
 
     assert pipe.transform(novo).shape[0] == 1
+
+
+def test_separar_alvo_rejeita_alvo_nao_numerico():
+    """Alvo com texto viraria NaN silencioso e o treino sairia errado."""
+    df = pd.DataFrame({cfg.ALVO: [1, 0, "talvez"], "servico": ["a", "b", "c"]})
+
+    with pytest.raises(ValueError, match="nao numericos"):
+        separar_alvo(df)
+
+
+def test_delta_cobranca_e_pulado_sem_as_colunas_necessarias():
+    """Payload reduzido pode nao trazer total_charges: nao pode quebrar."""
+    parcial = pd.DataFrame(
+        {
+            "services_monthly_charge": [50.0, 70.0],
+            "services_tenure_in_months": [10, 20],
+        }
+    )
+
+    saida = EngenhariaEstrutural(criar_delta_cobranca=True).fit_transform(parcial)
+
+    assert "delta_cobranca" not in saida.columns
+    assert list(saida.columns) == list(parcial.columns)
