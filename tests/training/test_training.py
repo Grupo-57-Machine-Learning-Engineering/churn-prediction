@@ -472,6 +472,18 @@ def test_constantes_do_campeao_tem_fonte_unica():
     assert predict.config.CHAMPION_MODEL_URI == config.CHAMPION_MODEL_URI
 
 
+def test_nome_do_arquivo_de_baseline_bate_com_o_que_baseline_py_grava():
+    """`champion.NOME_ARQUIVO_BASELINE` é string literal; `baseline.py` monta o
+    nome dinamicamente a partir de `NOME_RUN_BASELINE`. Nada os liga em código:
+    renomear `NOME_RUN_BASELINE` quebraria `resolver_pipeline_campeao` em
+    silêncio, procurando um arquivo que `_salvar_fallback` não grava mais
+    nesse nome.
+    """
+    from src.training import champion
+
+    assert f"{NOME_RUN_BASELINE}.joblib" == champion.NOME_ARQUIVO_BASELINE
+
+
 # --------------------------------------------------------------------------
 # ADR-008: pr_auc_std comparavel entre os tres metodos
 # --------------------------------------------------------------------------

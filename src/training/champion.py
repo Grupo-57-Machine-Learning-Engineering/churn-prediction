@@ -285,7 +285,7 @@ def registrar_campeao(
             versao,
         )
         return versao
-    except Exception as erro:  # pragma: no cover - depende de rede/credencial
+    except Exception as erro:
         logger.warning("Não foi possível registrar no Model Registry: %s", erro)
         logger.warning(
             "O artefato local em '%s' continua sendo a fonte de verdade.",
