@@ -197,6 +197,10 @@ container não tem navegador: ou falha ou fica pendurado segurando o startup.
 A porta não precisa ser configurada: o Render injeta `PORT` e o `CMD` lê de lá, caindo
 em 7860 quando a variável não existe.
 
+A instância que o grupo está usando está em
+`https://churn-prediction-api-7a4p.onrender.com`, com o Swagger em `/docs`. A raiz
+devolve 404 de propósito, não existe rota em `/`.
+
 O primeiro deploy demora, a imagem passa de 1 GB. A instância free dorme depois de 15
 minutos sem tráfego e leva perto de um minuto para acordar, com 0,1 vCPU, então antes de
 qualquer demonstração vale chamar `/health` uma vez e esperar o `ok` antes de mostrar a

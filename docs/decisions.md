@@ -562,10 +562,19 @@ troca de modelo enquanto está no ar.
   - O startup custa 2,4s de CPU (0,68 `sklearn`, 0,67 `mlflow`, 0,36 `pandas`, 0,22 para
     desserializar o campeão). Num core inteiro isso é rápido; em 0,1 vCPU vira dezenas de
     segundos, e é daí que sai o `--start-period=90s` do healthcheck.
-- **Limitação da verificação:** o `docker build` não chegou a rodar em lugar nenhum. O
-  ambiente onde as medições foram feitas não alcança registry de container, então as
-  camadas de base (`useradd` uid 1000, `chown`, `USER app`, `COPY --from` do uv) seguem
-  sem prova. O que está verificado é a instalação a partir do `uv.lock` e a API servindo.
+- **Verificação em produção (25/08/2026):** o serviço está no ar em
+  `https://churn-prediction-api-7a4p.onrender.com` (o Swagger fica em `/docs`; não existe
+  rota em `/`, então a raiz devolve 404 e isso é o comportamento correto). O build passou
+  na primeira tentativa. Startup medido dentro do container: 18 segundos entre o processo
+  começar e a porta abrir, dos quais 12 são o download do campeão no registry, contra os
+  2,6s medidos localmente com o joblib. É esse número que calibra o `--start-period=90s`.
+  O `/health` responde 200 e o `/sample` devolve os cinco clientes com `model_source` em
+  `mlflow:churn_champion/13`, o que prova que o container alcança o DagsHub com as
+  credenciais vindas do ambiente da plataforma, sem cair no fallback. As probabilidades
+  saíram idênticas às do joblib local casa por casa, o que confirma que o artefato em
+  `models/` e a versão 13 do registry são o mesmo modelo.
+  O Render define `WEB_CONCURRENCY=1` sozinho a partir da CPU disponível, então roda um
+  worker só, coerente com o pico de 260 MB medido.
 - **Fora de escopo:** trocar `mlflow` por `mlflow-skinny` derruba o `.venv` de 898 MB para
   439 MB, porque o `mlflow` cheio arrasta pyarrow, matplotlib, fontTools e sqlalchemy, que
   a API não usa. Ficou de fora porque mexer em dependência de núcleo perto da entrega
