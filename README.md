@@ -10,7 +10,7 @@ churn-prediction/
 │   ├── data/            # ETL: extração das 5 planilhas IBM, merge, schema pandera
 │   ├── features/        # transformadores custom + build_pipeline() (Contrato 2)
 │   ├── models/          # carregamento do campeão e predição (Etapa 3)
-│   ├── training/        # (a implementar) treino como script — hoje vive no notebook 05
+│   ├── training/        # dataset, métricas, estimadores, tuning, comparação e seleção do campeão (Etapa 2, extraído do notebook 05)
 │   ├── api/             # FastAPI: rotas e schemas Pydantic (Etapa 3)
 │   └── config.py        # seeds, paths, constantes
 ├── data/                # NÃO versionado (só local)
@@ -162,7 +162,7 @@ arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type:
 
 A imagem carrega só código. O campeão vem do Model Registry durante o startup, então
 `models/` fica de fora pelo `.dockerignore` e as credenciais entram como variável de
-ambiente, nunca no build (ADR-006 e ADR-007).
+ambiente, nunca no build (ADR-006 e ADR-009).
 
 Build e execução local:
 

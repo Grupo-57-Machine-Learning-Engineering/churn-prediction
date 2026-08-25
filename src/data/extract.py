@@ -18,12 +18,15 @@ def criar_diretorios() -> None:
     logger.info("Diretórios verificados/criados: %s, %s", RAW_DATA_DIR, PROCESSED_DATA_DIR)
 
 
-def baixar_arquivo(nome_arquivo: str, destino_dir: Path = RAW_DATA_DIR) -> Path:
+def baixar_arquivo(nome_arquivo: str, destino_dir: Path | None = None) -> Path:
     """Baixa um único arquivo da IBM, pulando se já existir localmente.
 
     Args:
         nome_arquivo: nome do arquivo alvo (deve estar em ARQUIVOS_ALVO).
-        destino_dir: diretório de destino do download.
+        destino_dir: diretório de destino do download. `None` resolve
+            `RAW_DATA_DIR` no momento da chamada, e não no import do módulo,
+            para que apontar o projeto para outro diretório de dados tenha
+            efeito de fato.
 
     Returns:
         Path do arquivo local (baixado ou já existente).
@@ -32,6 +35,7 @@ def baixar_arquivo(nome_arquivo: str, destino_dir: Path = RAW_DATA_DIR) -> Path:
         urllib.error.URLError: se o download falhar (rede, DNS, timeout).
         urllib.error.HTTPError: se o servidor retornar erro HTTP (subclasse de URLError).
     """
+    destino_dir = Path(destino_dir) if destino_dir is not None else RAW_DATA_DIR
     url_completa = f"{BASE_URL}{nome_arquivo}"
     caminho_destino = destino_dir / nome_arquivo
 
@@ -51,14 +55,19 @@ def baixar_arquivo(nome_arquivo: str, destino_dir: Path = RAW_DATA_DIR) -> Path:
     return caminho_destino
 
 
-def baixar_arquivos_ibm(arquivos: list[str] = ARQUIVOS_ALVO) -> list[Path]:
+def baixar_arquivos_ibm(
+    arquivos: list[str] | None = None,
+    destino_dir: Path | None = None,
+) -> list[Path]:
     """Baixa todos os arquivos alvo da IBM.
 
     Args:
-        arquivos: lista de nomes de arquivo a baixar.
+        arquivos: lista de nomes de arquivo a baixar. `None` usa `ARQUIVOS_ALVO`.
+        destino_dir: diretório de destino, repassado a `baixar_arquivo`.
 
     Returns:
         Lista de Paths locais dos arquivos (baixados ou pré-existentes).
     """
+    arquivos = list(ARQUIVOS_ALVO) if arquivos is None else arquivos
     logger.info("Iniciando o download dos arquivos diretamente da IBM.")
-    return [baixar_arquivo(arquivo) for arquivo in arquivos]
+    return [baixar_arquivo(arquivo, destino_dir) for arquivo in arquivos]

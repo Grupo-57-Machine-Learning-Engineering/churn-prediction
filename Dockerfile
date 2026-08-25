@@ -6,7 +6,7 @@
 # container, não reconstruir a imagem.
 #
 # Credenciais entram como variáveis de ambiente da plataforma, nunca no build.
-# Ver ADR-007 e a seção "Rodando com Docker" do README.
+# Ver ADR-009 e a seção "Rodando com Docker" do README.
 
 FROM python:3.11-slim
 
@@ -43,7 +43,7 @@ RUN uv sync --frozen --no-dev
 
 # 7860 é o padrão do Hugging Face Spaces e continua sendo o default. Plataforma que
 # sorteia a porta (Render, Fly, Cloud Run) injeta PORT no ambiente, e aí a porta vem
-# de lá. Ver ADR-007.
+# de lá. Ver ADR-009.
 ENV PORT=7860
 EXPOSE 7860
 

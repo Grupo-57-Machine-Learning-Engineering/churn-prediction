@@ -10,11 +10,13 @@ chaves de juncao (`customer_id`, `zip_code`), que ficam sem prefixo.
 
 from __future__ import annotations
 
+from src.config import TARGET
+
 # --------------------------------------------------------------------------
 # Alvo
 # --------------------------------------------------------------------------
 
-ALVO = "status_churn_value"
+ALVO = TARGET
 
 COLUNA_STATUS = "status_customer_status"
 """Rotulo textual Joined / Stayed / Churned. Usado para o filtro de censura
