@@ -158,6 +158,50 @@ forte da base. Na dúvida, omita o campo em vez de mandar zero.
 No PowerShell o heredoc acima não existe. Use o Swagger em `/docs`, ou salve o JSON num
 arquivo e rode `curl.exe -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d "@payload.json"`.
 
+## Rodando com Docker
+
+A imagem carrega só código. O campeão vem do Model Registry durante o startup, então
+`models/` fica de fora pelo `.dockerignore` e as credenciais entram como variável de
+ambiente, nunca no build (ADR-006 e ADR-007).
+
+Build e execução local:
+
+```bash
+docker build -t churn-api .
+
+docker run --rm -p 7860:7860 \
+  -e MLFLOW_TRACKING_URI=https://dagshub.com/<owner>/<repo>.mlflow \
+  -e MLFLOW_TRACKING_USERNAME=<usuario> \
+  -e MLFLOW_TRACKING_PASSWORD=<token> \
+  -e MLFLOW_HTTP_REQUEST_TIMEOUT=60 \
+  churn-api
+```
+
+O Swagger fica em `http://127.0.0.1:7860/docs`. Sem as variáveis a API sobe do mesmo
+jeito: `/health` responde `ok` e as rotas de predição devolvem 503, porque dentro do
+container não existe o joblib de fallback.
+
+`DAGSHUB_REPO_OWNER` e `DAGSHUB_REPO_NAME` ficam vazios em container, de propósito.
+Preenchidos, o projeto chama `dagshub.init()`, que é login interativo por navegador, e
+container não tem navegador: ou falha ou fica pendurado segurando o startup.
+
+### Deploy no Render
+
+1. New > Web Service, conectar o repositório, Language/Runtime **Docker**.
+2. Branch `develop` (ou `main`, conforme o que estiver publicado).
+3. Instance Type **Free**.
+4. Em Environment, as três variáveis do token acima mais
+   `MLFLOW_HTTP_REQUEST_TIMEOUT=60`. As duas do DagsHub não entram.
+5. Health Check Path: `/health`.
+
+A porta não precisa ser configurada: o Render injeta `PORT` e o `CMD` lê de lá, caindo
+em 7860 quando a variável não existe.
+
+O primeiro deploy demora, a imagem passa de 1 GB. A instância free dorme depois de 15
+minutos sem tráfego e leva perto de um minuto para acordar, com 0,1 vCPU, então antes de
+qualquer demonstração vale chamar `/health` uma vez e esperar o `ok` antes de mostrar a
+tela.
+
 ## Comandos (Makefile)
 
 | Comando | O que faz |

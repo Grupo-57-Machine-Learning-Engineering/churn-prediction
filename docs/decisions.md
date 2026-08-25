@@ -441,3 +441,61 @@ troca de modelo enquanto está no ar.
   `services_offer` nunca entrar por descuido.
 - **Consequências:** o Contrato 3 mudou (campo novo na resposta), avisado no canal.
   Como rodar a API está no README, na seção "Rodando a API localmente".
+
+### ADR-007 — Deploy da API em container
+
+- **Contexto:** deploy em nuvem é entrega opcional (`monitoring_plan.md`, linha 6), então
+  a régua aqui é ponto extra e não requisito. O que a Etapa 4 precisa é de um lugar com
+  URL permanente para demonstrar a API funcionando.
+- **Decisão (o modelo não entra na imagem):** o `.dockerignore` exclui `models/` e a API
+  busca o campeão no Registry durante o startup, coerente com o ADR-006. Promover campeão
+  novo passa a ser reiniciar o container, não reconstruir a imagem, e um container
+  reiniciado nunca serve joblib desatualizado porque ele não existe lá dentro.
+  Custo assumido: sem rede ou sem credencial o container não tem fallback nenhum, a API
+  sobe e as rotas de predição devolvem 503. É o comportamento desejado: melhor recusar
+  explicitamente do que servir um modelo que ninguém sabe qual é.
+- **Decisão (plataforma: Render free):** o Hugging Face Spaces era a escolha original e
+  caiu. A documentação do Hub passou a exigir plano pago para Space com SDK Docker ou
+  Gradio em conta pessoal, e só Static continua gratuito. O sintoma é enganoso: o Space
+  fica `Paused` e o restart devolve 403 com "You've reached your cpu-basic quota limit",
+  mesmo numa conta com um único Space e nenhum minuto consumido. Não é cota temporária e
+  não adianta hospedar na conta de outro integrante, porque a barreira é do plano e não
+  da conta. Descartados junto: Koyeb (exige cartão para criar conta, mesmo no free),
+  Railway (sem free real), Fly (cartão). O Render free ficou por não pedir cartão e por
+  caber na medição de memória abaixo.
+  Custo assumido: a instância free dorme depois de 15 minutos sem tráfego e leva perto de
+  um minuto para acordar, com 0,1 vCPU. Para uma demonstração gravada isso se resolve
+  aquecendo a URL antes; como serviço de verdade não serviria, e o plano de monitoramento
+  parte do princípio de que isso é vitrine, não produção.
+- **Decisão (porta lida de `PORT`):** o `CMD` passou a ler `${PORT:-7860}` em shell form
+  com `exec`. O 7860 continua sendo o default porque é o que o HF Spaces espera, mas
+  plataforma que sorteia a porta injeta `PORT` no ambiente. O `exec` está ali para o
+  uvicorn substituir o `/bin/sh` e receber o `SIGTERM` da plataforma direto: sem ele todo
+  restart vira kill por timeout.
+- **Medições (25/08/2026):** feitas rodando os passos do Dockerfile em Python 3.11 no
+  Linux, com o campeão vindo do joblib local.
+  - `uv sync --frozen --no-dev` instala em 22s e nenhuma dependência é compilada de
+    fonte, tudo vem de wheel. Confirma que a `python:3.11-slim`, sem toolchain de build,
+    dá conta.
+  - O único build de fonte é o próprio `churn-prediction` pelo hatchling, o que confirma
+    que o `COPY` do `README.md` na imagem é obrigatório e não zelo.
+  - `.venv` de 898 MB, imagem estimada em torno de 1,05 GB.
+  - A API sobe em 2,6s, `/health` responde 200 e `/sample` devolve os cinco clientes.
+  - Pico de memória residente de 260 MB, contra os 512 MB da instância free.
+  - O startup custa 2,4s de CPU (0,68 `sklearn`, 0,67 `mlflow`, 0,36 `pandas`, 0,22 para
+    desserializar o campeão). Num core inteiro isso é rápido; em 0,1 vCPU vira dezenas de
+    segundos, e é daí que sai o `--start-period=90s` do healthcheck.
+- **Limitação da verificação:** o `docker build` não chegou a rodar em lugar nenhum. O
+  ambiente onde as medições foram feitas não alcança registry de container, então as
+  camadas de base (`useradd` uid 1000, `chown`, `USER app`, `COPY --from` do uv) seguem
+  sem prova. O que está verificado é a instalação a partir do `uv.lock` e a API servindo.
+- **Fora de escopo:** trocar `mlflow` por `mlflow-skinny` derruba o `.venv` de 898 MB para
+  439 MB, porque o `mlflow` cheio arrasta pyarrow, matplotlib, fontTools e sqlalchemy, que
+  a API não usa. Ficou de fora porque mexer em dependência de núcleo perto da entrega
+  troca risco real por peso de imagem que ninguém está pagando.
+- **Consequências:** `DAGSHUB_REPO_OWNER` e `DAGSHUB_REPO_NAME` ficam vazios no ambiente
+  de deploy, de propósito. Preenchidos, o `configurar_mlflow_tracking()` chama
+  `dagshub.init()`, que é login interativo por navegador, e container não tem navegador:
+  ou falha ou fica pendurado segurando o startup. Só os três do token entram como
+  variável de ambiente da plataforma. Como rodar em container está no README, na seção
+  "Rodando com Docker".
