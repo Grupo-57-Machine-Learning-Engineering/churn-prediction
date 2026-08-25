@@ -262,6 +262,8 @@ troca de modelo enquanto está no ar.
   configuração de modelo estiver definitivamente escolhida. Toda a experimentação
   (candidatos, tuning, comparação, registro do campeão) roda em
   `notebooks/05_modelagem.ipynb`.
+  **Superado pelo ADR-007**: os dois módulos foram populados depois, extraindo esse
+  mesmo código do notebook.
 - **Sem retreino do baseline.** A Regressão Logística da Etapa 1
   (`notebooks/04_baseline.ipynb`, run `baseline_logistic_regression`) não é retreinada —
   o notebook 05 busca essa run existente no MLflow (`mlflow.search_runs`) e a usa como
