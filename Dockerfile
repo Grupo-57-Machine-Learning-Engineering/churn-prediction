@@ -41,13 +41,19 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY --chown=app:app src/ ./src/
 RUN uv sync --frozen --no-dev
 
-# 7860 é a porta que o Hugging Face Spaces expõe por padrão.
+# 7860 é o padrão do Hugging Face Spaces e continua sendo o default. Plataforma que
+# sorteia a porta (Render, Fly, Cloud Run) injeta PORT no ambiente, e aí a porta vem
+# de lá. Ver ADR-007.
+ENV PORT=7860
 EXPOSE 7860
 
-# Carência alta de propósito: o startup baixa o campeão do registry e levou
-# ~7s medidos em rede doméstica. Sem essa folga a plataforma mata o container
+# Carência alta de propósito: o startup importa mlflow, sklearn e pandas e baixa o
+# campeão do registry. Medido em 2,4s de CPU num core inteiro, o que numa instância
+# de 0,1 vCPU vira dezenas de segundos. Sem essa folga a plataforma mata o container
 # antes dele terminar de subir, e entra em loop de restart.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health')"
+    CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','7860')+'/health')"
 
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Shell form com exec de propósito: sem o exec o uvicorn vira filho do /bin/sh e não
+# recebe o SIGTERM da plataforma, o que transforma todo restart em kill por timeout.
+CMD ["sh", "-c", "exec uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
