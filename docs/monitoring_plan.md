@@ -44,4 +44,24 @@ de quem já cancelou.
 
 ## Re-treino
 
-<!-- Frequência, dados usados, critério de promoção do novo modelo. -->
+Proposta inicial, a validar pelo grupo:
+
+- **Frequência:** trimestral por padrão, ou antecipado sempre que um dos gatilhos da seção
+  "Gatilhos e ações" acima disparar (drift relevante numa feature-chave ou queda de
+  PR-AUC/recall). Não há um cron rodando nesta fase do desafio (plano documentado, não
+  implementação); o gatilho hoje é a checagem periódica manual descrita em "Como monitorar".
+- **Dados usados:** todo o histórico acumulado desde o snapshot atual das 5 planilhas IBM
+  (`src/data/extract.py`) até a data do re-treino, não uma janela móvel — o volume da base é
+  pequeno o suficiente (dataset Telco) para não justificar descartar histórico. O split
+  treino/teste do novo ciclo segue o mesmo `SEED`/proporção de `src/config.py`, para manter o
+  teste comparável entre ciclos.
+- **Critério de promoção:** o candidato passa pelo mesmo processo de comparação e seleção já
+  implementado em `src/training/comparison.py`/`selecionar_campeao`
+  (`src/training/champion.py`) — maior PR-AUC média de CV entre os candidatos e o baseline,
+  avaliado uma única vez no teste. Para *substituir* o `@champion` em produção
+  (`CHAMPION_MODEL_ALIAS`, ADR-006), o candidato selecionado precisa, além disso, igualar ou
+  superar o PR-AUC de teste do `@champion` atual (não regressão) nesse mesmo conjunto de
+  teste; um novo candidato que perca PR-AUC de teste não move o alias, mesmo vencendo a
+  comparação de CV interna. `registrar_campeao` já isola o registro do treino (best-effort),
+  então essa checagem de não regressão entra como um passo manual antes de mover o alias, não
+  como parte automática de `selecionar_campeao`.

@@ -10,7 +10,7 @@ churn-prediction/
 │   ├── data/            # ETL: extração das 5 planilhas IBM, merge, schema pandera
 │   ├── features/        # transformadores custom + build_pipeline() (Contrato 2)
 │   ├── models/          # carregamento do campeão e predição (Etapa 3)
-│   ├── training/        # (a implementar) treino como script — hoje vive no notebook 05
+│   ├── training/        # dataset, métricas, estimadores, tuning, comparação e seleção do campeão (Etapa 2, extraído do notebook 05)
 │   ├── api/             # FastAPI: rotas e schemas Pydantic (Etapa 3)
 │   └── config.py        # seeds, paths, constantes
 ├── data/                # NÃO versionado (só local)
