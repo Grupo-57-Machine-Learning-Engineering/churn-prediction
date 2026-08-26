@@ -16,6 +16,7 @@ relevante (arquitetura, dados, contrato) ganha uma entrada aqui.
 | Lint / formatação      | ruff                                          | Sem erros é critério de qualidade de código                                                   |
 | Testes                   | pytest                                        | Mínimo 2: pré-processamento e status da API                                                    |
 | Fluxo de branches / gate | `develop` integração; `main` só via PR | Org free privada → sem rulesets. Gate por hooks locais + CI. Ver [workflow.md](workflow.md)      |
+| Deploy da API            | Render (free tier), via Docker                | Entrega opcional pelo enunciado; ver ADR-009                                                    |
 
 ---
 
@@ -519,6 +520,7 @@ troca de modelo enquanto está no ar.
   caminho é trocar `pr_auc_std` por `pr_auc_std_entre_folds` no `ResultadoTuning` e filtrar os
   trials por `TrialState.COMPLETE`, o que exige reexecutar o notebook 05 e anotar a quebra de
   comparabilidade com as runs antigas do DagsHub.
+
 ### ADR-009 — Deploy da API em container
 
 - **Contexto:** deploy em nuvem é entrega opcional (`monitoring_plan.md`, linha 6), então

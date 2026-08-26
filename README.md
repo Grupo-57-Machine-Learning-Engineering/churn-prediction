@@ -20,6 +20,8 @@ churn-prediction/
 ├── docs/                # Model Card e documentação do modelo
 ├── scripts/             # hooks/scripts de suporte (ex.: guard de push)
 ├── .github/             # workflows (CI + guards) e template de PR
+├── Dockerfile           # imagem da API pra deploy em container (ADR-009)
+├── .dockerignore        # o que fica fora da imagem (modelo, dados, testes, segredos)
 ├── pyproject.toml       # single source of truth (deps, ruff, pytest, commitizen)
 ├── uv.lock              # versões travadas (reprodutibilidade)
 └── Makefile
@@ -131,11 +133,24 @@ curl -X POST http://127.0.0.1:8000/predict \
 EOF
 ```
 
-Resposta: `{"churn": true|false, "probability": 0.0 a 1.0, "model_version": "0.1.0"}`.
+Resposta:
+
+```json
+{
+  "churn": true,
+  "probability": 0.8757505407441455,
+  "model_version": "0.1.0",
+  "model_source": "mlflow:churn_champion/13"
+}
+```
+
 A probabilidade é a propensão de churn no snapshot atual, sem horizonte temporal
 (ADR-005); a classe usa o threshold padrão 0,5 (`src/config.py:THRESHOLD_DECISAO`,
-ADR-006). Payload inválido devolve 422: tipo errado, campo faltando, número fora de faixa
-(idade ou cobrança negativa) ou campo extra, incluindo `services_offer`, que está em
+ADR-006). `model_source` indica de onde o campeão foi carregado no startup --
+`mlflow:churn_champion/<versão>` (Model Registry) ou `joblib-local` (artefato em disco),
+ver ADR-006 -- e o exemplo acima (Contrato 3 completo em `docs/decisions.md`) tem cada
+campo comentado. Payload inválido devolve 422: tipo errado, campo faltando, número fora de
+faixa (idade ou cobrança negativa) ou campo extra, incluindo `services_offer`, que está em
 quarentena por suspeita de vazamento.
 
 As colunas de texto aceitam qualquer valor. Se chegar uma categoria que o modelo não viu
