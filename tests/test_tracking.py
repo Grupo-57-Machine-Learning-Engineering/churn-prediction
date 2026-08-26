@@ -24,7 +24,11 @@ def test_mlflow_http_request_timeout_le_da_variavel_de_ambiente(
         importlib.reload(config)
         assert config.MLFLOW_HTTP_REQUEST_TIMEOUT == "30"
     finally:
-        importlib.reload(config)  # restaura o estado original do módulo
+        # `monkeypatch.setenv` só desfaz a variável de ambiente no teardown do
+        # fixture, que roda depois deste bloco -- sem o `undo()` explícito, este
+        # reload recarregaria com "30" ainda no ambiente e não restauraria nada.
+        monkeypatch.undo()
+        importlib.reload(config)
 
 
 def test_nao_chama_dagshub_quando_opcao_a_completa(monkeypatch: pytest.MonkeyPatch) -> None:
