@@ -1,11 +1,34 @@
 """Testes de src.config: setup do MLflow/DagsHub e utilitarios de run."""
 
+import importlib
 from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
 
 from src import config
+
+
+def test_mlflow_http_request_timeout_le_da_variavel_de_ambiente(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`MLFLOW_HTTP_REQUEST_TIMEOUT` deve vir de `os.environ`, não de default fixo.
+
+    A constante existe só pra descoberta/teste (ver docstring em `src/config.py`):
+    quem aplica o timeout de fato é a própria lib `mlflow`, lendo essa mesma
+    variável sozinha. Aqui garantimos que `config` a lê corretamente do
+    ambiente, recarregando o módulo pra pegar o `os.getenv` de novo.
+    """
+    monkeypatch.setenv("MLFLOW_HTTP_REQUEST_TIMEOUT", "30")
+    try:
+        importlib.reload(config)
+        assert config.MLFLOW_HTTP_REQUEST_TIMEOUT == "30"
+    finally:
+        # `monkeypatch.setenv` só desfaz a variável de ambiente no teardown do
+        # fixture, que roda depois deste bloco -- sem o `undo()` explícito, este
+        # reload recarregaria com "30" ainda no ambiente e não restauraria nada.
+        monkeypatch.undo()
+        importlib.reload(config)
 
 
 def test_nao_chama_dagshub_quando_opcao_a_completa(monkeypatch: pytest.MonkeyPatch) -> None:

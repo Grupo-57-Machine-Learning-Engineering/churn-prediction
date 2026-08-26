@@ -74,6 +74,43 @@ def test_carregar_campeao_prioriza_mlflow_sobre_joblib_local(
     assert campeao.origem == "mlflow:churn_champion/7"
 
 
+def test_carregar_campeao_cai_no_joblib_quando_mlflow_estoura_timeout(
+    tmp_path, campeao_sintetico, monkeypatch
+):
+    """Cobre o cenário do docstring de `_carregar_do_mlflow`: um DagsHub lento.
+
+    O cliente HTTP interno do `mlflow` levanta `requests.exceptions.Timeout`
+    quando a chamada estoura o `MLFLOW_HTTP_REQUEST_TIMEOUT` (ver
+    `mlflow.utils.rest_utils`, que captura esse exato tipo antes de
+    reembrulhar em `MlflowException`). Simulamos isso sem rede, monkeypatchando
+    `mlflow.sklearn.load_model` pra levantar o erro -- o ponto é garantir que
+    o timeout não trava o carregamento nem propaga, e sim cai pro joblib
+    local, do jeito que o docstring promete.
+    """
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_URI", "https://dagshub.com/x/y.mlflow")
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_USERNAME", "usuario")
+    monkeypatch.setattr(config, "MLFLOW_TRACKING_PASSWORD", "token")
+    monkeypatch.setattr(config, "DAGSHUB_REPO_OWNER", None)
+    monkeypatch.setattr(config, "DAGSHUB_REPO_NAME", None)
+    monkeypatch.setattr(config, "configurar_mlflow_tracking", lambda: None)
+
+    import mlflow.sklearn
+    import requests
+
+    def _estoura_timeout(*args, **kwargs):
+        raise requests.exceptions.Timeout("DagsHub não respondeu a tempo")
+
+    monkeypatch.setattr(mlflow.sklearn, "load_model", _estoura_timeout)
+
+    caminho = tmp_path / "champion_model.joblib"
+    joblib.dump(campeao_sintetico, caminho)
+
+    campeao = carregar_campeao(caminho)
+
+    assert campeao.origem == ORIGEM_LOCAL
+    assert campeao.modelo is not None
+
+
 def test_prever_respeita_threshold(campeao_sintetico, payload_valido):
     dados = pd.DataFrame([payload_valido])
 

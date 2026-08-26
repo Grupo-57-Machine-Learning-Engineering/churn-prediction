@@ -73,6 +73,18 @@ MLFLOW_EXPERIMENT_NAME: str = os.getenv("MLFLOW_EXPERIMENT_NAME", "churn-predict
 DAGSHUB_REPO_OWNER: str | None = os.getenv("DAGSHUB_REPO_OWNER")
 DAGSHUB_REPO_NAME: str | None = os.getenv("DAGSHUB_REPO_NAME")
 
+MLFLOW_HTTP_REQUEST_TIMEOUT: str | None = os.getenv("MLFLOW_HTTP_REQUEST_TIMEOUT")
+"""Tempo limite (segundos) das chamadas HTTP do cliente MLflow (ver `.env.example`).
+
+Declarado aqui só por descoberta/documentação e pra dar algo greppável e
+testável -- ninguém em `src/` lê essa constante nem a passa explicitamente
+pra nenhuma chamada `mlflow.*`. Quem aplica o timeout de fato é a própria
+lib `mlflow`, que lê `os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"]` sozinha em
+seu cliente HTTP interno; o `load_dotenv()` no topo deste módulo já garante
+que a variável está em `os.environ` quando o `mlflow` for importado. Não
+implementar um timeout próprio aqui de propósito: duplicaria (e poderia
+conflitar com) o mecanismo que o `mlflow` já tem."""
+
 
 def configurar_mlflow_tracking() -> None:
     """Aponta o MLflow para o DagsHub antes do primeiro `mlflow.start_run()`.
