@@ -1,0 +1,41 @@
+# O que NÃO entra na imagem da API.
+#
+# A regra: só código de produção e o necessário pra instalar as dependências.
+# Tudo que é dado, experimento, teste ou segredo fica fora.
+
+# O artefato do campeão fica de fora de propósito (ADR-006/ADR-007): a API
+# busca o modelo no Model Registry no startup. Se o joblib entrasse aqui, cada
+# promoção de campeão exigiria rebuild da imagem, e um container reiniciado
+# poderia servir uma versão antiga sem ninguém perceber.
+models/
+
+# Credenciais. O .env nunca entra na imagem; as variáveis vêm da plataforma.
+.env
+*.env.local
+
+# Dados: pesados, não versionados, e a API não lê nenhum deles.
+data/
+
+# Experimentação e testes não fazem parte do runtime.
+notebooks/
+tests/
+docs/
+scripts/
+Makefile
+
+# Ambiente local. Recriar dentro da imagem é o ponto do build.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Git e CI.
+.git/
+.github/
+.gitignore
+.pre-commit-config.yaml
+
+# Notas de trabalho individuais.
+handoff*.md
