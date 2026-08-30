@@ -13,7 +13,7 @@ def test_package_importa():
 
 def test_config_tem_seed_e_target():
     assert config.SEED == 42
-    assert config.TARGET == "Churn"
+    assert config.TARGET == "status_churn_value"
 
 
 def test_project_root_existe():

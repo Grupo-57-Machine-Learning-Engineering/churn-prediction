@@ -10,11 +10,13 @@ chaves de juncao (`customer_id`, `zip_code`), que ficam sem prefixo.
 
 from __future__ import annotations
 
+from src.config import TARGET
+
 # --------------------------------------------------------------------------
 # Alvo
 # --------------------------------------------------------------------------
 
-ALVO = "status_churn_value"
+ALVO = TARGET
 
 COLUNA_STATUS = "status_customer_status"
 """Rotulo textual Joined / Stayed / Churned. Usado para o filtro de censura
@@ -120,11 +122,18 @@ handoff). Escalonar sem separar mistura duas populacoes na mesma distribuicao.
 # --------------------------------------------------------------------------
 
 NULOS_LEGITIMOS = {
-    "services_internet_type": "Sem Internet",
-    "services_offer": "Sem Oferta",
+    "services_internet_type": "No Internet Service",
+    "services_offer": "No Offer",
 }
 """Ausencia com significado de negocio, nao dado faltante. Um `dropna`
-generico aqui derruba 22% e 55% da base respectivamente."""
+generico aqui derruba 22% e 55% da base respectivamente.
+
+Rotulos em ingles de proposito: todo o resto do dominio categorico da base
+(demais colunas de servico, `services_offer` = "Offer A".."Offer E",
+`services_internet_type` = "Cable"/"DSL"/"Fiber Optic") vem em ingles da
+IBM -- ver `docs/decisions.md` (fonte das descricoes de coluna). Um rotulo
+em portugues destoaria do dominio e criaria uma categoria hibrida de idioma
+na mesma coluna."""
 
 
 # --------------------------------------------------------------------------

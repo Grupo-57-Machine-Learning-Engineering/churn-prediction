@@ -175,8 +175,8 @@ def test_nulos_legitimos_viram_categoria(base):
     saida = EngenhariaEstrutural().fit_transform(base)
 
     assert saida["services_internet_type"].isna().sum() == 0
-    assert "Sem Internet" in set(saida["services_internet_type"])
-    assert "Sem Oferta" in set(saida["services_offer"])
+    assert "No Internet Service" in set(saida["services_internet_type"])
+    assert "No Offer" in set(saida["services_offer"])
 
 
 def test_flags_de_zero_estrutural(base):
@@ -186,6 +186,23 @@ def test_flags_de_zero_estrutural(base):
     assert (saida.loc[sem_internet, "flag_sem_internet"] == 1).all()
     assert (saida.loc[~sem_internet, "flag_sem_internet"] == 0).all()
     assert "flag_sem_telefone" in saida.columns
+
+
+def test_flag_de_zero_estrutural_nao_confunde_ausente_com_zero(base):
+    """Dado faltando não pode virar "cliente sem o serviço".
+
+    Zero em `avg_monthly_gb_download` significa que o cliente não tem
+    internet, que é o fator de proteção mais forte da base. Um nulo ali
+    significa apenas que o dado não veio, então a flag fica nula e quem
+    decide é o imputer, não o transformador.
+    """
+    base = base.copy()
+    base.loc[0, "services_avg_monthly_gb_download"] = np.nan
+
+    saida = EngenhariaEstrutural().fit_transform(base)
+
+    assert pd.isna(saida.loc[0, "flag_sem_internet"])
+    assert saida["flag_sem_internet"].iloc[1:].notna().all()
 
 
 def test_delta_cobranca_zero_quando_nao_ha_reajuste(base):
@@ -330,3 +347,26 @@ def test_pipeline_lida_com_categoria_nova(base):
     novo.loc[:, "services_payment_method"] = "Pix"
 
     assert pipe.transform(novo).shape[0] == 1
+
+
+def test_separar_alvo_rejeita_alvo_nao_numerico():
+    """Alvo com texto viraria NaN silencioso e o treino sairia errado."""
+    df = pd.DataFrame({cfg.ALVO: [1, 0, "talvez"], "servico": ["a", "b", "c"]})
+
+    with pytest.raises(ValueError, match="nao numericos"):
+        separar_alvo(df)
+
+
+def test_delta_cobranca_e_pulado_sem_as_colunas_necessarias():
+    """Payload reduzido pode nao trazer total_charges: nao pode quebrar."""
+    parcial = pd.DataFrame(
+        {
+            "services_monthly_charge": [50.0, 70.0],
+            "services_tenure_in_months": [10, 20],
+        }
+    )
+
+    saida = EngenhariaEstrutural(criar_delta_cobranca=True).fit_transform(parcial)
+
+    assert "delta_cobranca" not in saida.columns
+    assert list(saida.columns) == list(parcial.columns)

@@ -30,6 +30,7 @@ models/*
 # IDE
 .vscode/
 .idea/
+.vs/
 
 # OS
 .DS_Store
@@ -40,3 +41,7 @@ Thumbs.db
 .coverage
 htmlcov/
 .ruff_cache/
+
+# Notas de trabalho individuais (handoff entre sessões), não documentação do grupo.
+# O que é decisão do grupo mora em docs/.
+handoff*.md

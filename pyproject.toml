@@ -27,6 +27,7 @@ dev = [
     "pre-commit>=3.7",
     "commitizen>=3.27",
     "jupyter>=1.0",
+    "optuna>=3.6",
 ]
 
 [build-system]
