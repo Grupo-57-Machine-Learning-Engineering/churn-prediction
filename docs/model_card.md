@@ -160,6 +160,20 @@ mas essa é uma decisão de negócio, não uma conclusão puramente técnica (ve
 - **Diferença campeão vs. baseline é pequena no teste** (§4) — ambos são candidatos
   defensáveis; a escolha do Random Forest reflete o critério de CV definido a priori, não
   uma vitória inequívoca.
+- **Predição com ficha incompleta não é conservadora.** Todo campo do `POST /predict` é
+  opcional e o pipeline imputa o que faltar (ADR-006), mas o resultado não sai tímido em
+  cima do threshold. O cliente `ficha_incompleta` do `GET /sample`, com 4 dos 28 campos
+  preenchidos, é classificado como churn com probabilidade 0,6937. A predição se apoia no
+  perfil mediano do treino no lugar do que falta, e nada na resposta sinaliza isso. Quem
+  consome deve mandar tudo que souber do cliente, e tratar predição com ficha rala como
+  menos informativa do que o número faz parecer.
+- **A EDA foi feita sobre 100% dos dados, antes do split.** As decisões de feature (o que
+  foi descartado por suspeita de vazamento, o tratamento de nulos, a engenharia em
+  `EngenhariaEstrutural`) vieram de uma análise exploratória rodada sobre a base inteira,
+  antes de separar treino e teste. É vazamento metodológico brando: o conjunto de teste
+  influenciou indiretamente as decisões de modelagem, então as métricas de §4 são
+  otimistas em alguma medida que não foi quantificada. O correto seria rodar a EDA só
+  sobre o treino; não foi refeito nesta entrega porque exigiria repetir a Etapa 1 inteira.
 
 ## 7. Considerações éticas e de viés
 
@@ -201,9 +215,18 @@ Contrato de entrada/saída da API (`/predict`), ver `decisions.md` §"Contrato 3
 {
   "churn": true,
   "probability": 0.78,
-  "model_version": "0.1.0"
+  "model_version": "0.1.0",
+  "model_source": "mlflow:churn_champion/13"
 }
 ```
+
+Os dois campos de identificação respondem perguntas diferentes (ADR-006). O
+`model_version` é a versão do pacote (`src.__version__`), e identifica o **código**: é
+`src/features/preparation.py` que determina como o dado chega no estimador. O
+`model_source` identifica o **modelo** que respondeu, com a versão do Registry quando ela
+pôde ser resolvida (`mlflow:churn_champion/13`) ou `joblib-local` quando o campeão veio do
+artefato em disco. Existem os dois porque, com o Registry na frente do joblib, o modelo
+que responde pode mudar sem o pacote mudar de versão.
 
 ## 9. Decisão pendente: threshold de classificação
 
