@@ -80,8 +80,18 @@ acurácia de 73,5% já é o piso de "prever ninguém cancela", ver `ml_canvas.md
 | Random Forest | RandomizedSearchCV | 0,7748 | 0,7008 | 0,9008 |
 | MLP (sem peso de classe) | Optuna | 0,7709 | 0,6902 | 0,9018 |
 | MLP (balanceado) | Optuna | 0,7682 | 0,6913 | 0,9000 |
+| MLP (sem peso de classe) | GridSearchCV | 0,7625 | 0,6797 | 0,8979 |
+| MLP (balanceado) | RandomizedSearchCV | 0,7624 | 0,6905 | 0,8988 |
+| MLP (balanceado) | GridSearchCV | 0,7621 | 0,6901 | 0,8976 |
+| MLP (sem peso de classe) | RandomizedSearchCV | 0,7611 | 0,6781 | 0,8963 |
 | Regressão Logística (tunada) | Optuna | 0,7575 | 0,6804 | 0,8961 |
-| Regressão Logística (baseline) | — | 0,757 | 0,679 | 0,896 |
+| Regressão Logística (tunada) | RandomizedSearchCV | 0,7574 | 0,6797 | 0,8961 |
+| Regressão Logística (tunada) | GridSearchCV | 0,7574 | 0,6803 | 0,8959 |
+| Regressão Logística (baseline) | — | 0,7571 | 0,6793 | 0,8961 |
+
+Tabela completa (todos os 4 candidatos × 3 estratégias de tuning + o baseline) via
+`mlflow.search_runs` em `notebooks/05_modelagem.ipynb` §6 — ver também a run
+`etapa2_comparacao_final` no MLflow/DagsHub para o artefato versionado.
 
 Critério de escolha decidido *a priori*: maior PR-AUC médio de CV. O teste foi avaliado
 uma única vez, só para o vencedor.
@@ -214,3 +224,10 @@ decisão). Enquanto isso não é decidido, `0,5` é o threshold em uso.
 - Hiperparâmetros finais do campeão (`RandomForestClassifier`, escolhidos pelo Optuna):
   `n_estimators=450`, `max_depth=30`, `min_samples_leaf=7`, `class_weight="balanced"`,
   `random_state=42`.
+- Cobertura de testes de `src/` (`make cov`): **99%** (878 statements, 9 sem cobertura),
+  96 testes. As linhas faltantes são: o `except` de erro inesperado em `POST /predict`
+  (`src/api/main.py`), o fallback best-effort do carregamento via MLflow para o joblib
+  local e a resolução do número de versão do alias `@champion` (`src/models/predict.py`)
+  e o guard `if __name__ == "__main__"` do script de ETL (`src/data/pipeline.py`) —
+  ramos defensivos que dependem de falha de rede/credencial ou de execução via CLI,
+  não lógica de negócio sem teste.
