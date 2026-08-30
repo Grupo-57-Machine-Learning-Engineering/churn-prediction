@@ -2,6 +2,9 @@
 
 Previsão de churn de clientes (dataset Telco Customer Churn / IBM) com Scikit-Learn — comparando modelos lineares, baseados em árvores e rede neural (`MLPClassifier`) — e API de inferência FastAPI.
 
+- Vídeo de apresentação: https://youtu.be/JsZCRBmj-7A
+- API no ar: https://churn-prediction-api-7a4p.onrender.com/docs
+
 ## Estrutura
 
 ```
