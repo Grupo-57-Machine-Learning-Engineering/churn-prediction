@@ -1,6 +1,12 @@
-# Detector (não previne) de push direto na main. Como o repo é privado em org
-# free, não há branch protection: este workflow denuncia com run vermelho quando
-# um commit entra na main FORA do fluxo de PR (develop -> PR -> main).
+# Detector (não previne) de push direto na main. Como não há branch protection
+# no plano da org, este workflow denuncia com run vermelho quando um commit entra
+# na main FORA do fluxo de PR.
+#
+# O critério aceita PR mergeado para `main` ou para `develop`. Motivo: uma release
+# `develop -> main` arrasta junto os commits que já estavam na develop, e esses
+# foram introduzidos por PRs cuja base era `develop`. Exigir base `main` em todos
+# reprovava o fluxo correto (aconteceu no #42). Commit empurrado na marra continua
+# sendo pego, porque ele não tem PR mergeado nenhum associado.
 
 name: "Guard: no direct push to main"
 
@@ -45,10 +51,10 @@ jobs:
           FAILED=0
           for sha in $commits; do
             merged_prs=$(gh api "repos/${REPO}/commits/${sha}/pulls" \
-              --jq '[.[] | select(.base.ref == "main" and .merged_at != null)] | length')
+              --jq '[.[] | select(.merged_at != null and (.base.ref == "main" or .base.ref == "develop"))] | length')
 
             if [ "$merged_prs" -eq 0 ]; then
-              echo "::error::Commit $sha entrou em main sem PR merged associado (push direto detectado, por @${{ github.actor }})."
+              echo "::error::Commit $sha entrou em main sem nenhum PR merged associado (nem para main, nem para develop). Autor do push: @${{ github.actor }}."
               FAILED=1
             else
               echo "OK: commit $sha veio de PR merged para main."
@@ -56,6 +62,6 @@ jobs:
           done
 
           if [ "$FAILED" -eq 1 ]; then
-            echo "::error::Push direto na main detectado (por @${{ github.actor }}). Fluxo esperado: develop -> PR -> main."
+            echo "::error::Commit sem PR na main (push por @${{ github.actor }}). Fluxo esperado: branch -> PR -> develop -> PR -> main."
             exit 1
           fi
